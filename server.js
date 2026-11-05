@@ -4,9 +4,18 @@ const { Server } = require('socket.io');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const { createClient } = require('@supabase/supabase-js');
 
 const PORT = process.env.PORT || 3847;
 const DATA_FILE = path.join(__dirname, 'data', 'players.json');
+const SUPABASE_URL = (process.env.SUPABASE_URL || '').trim();
+const SUPABASE_SERVICE_ROLE_KEY = (process.env.SUPABASE_SERVICE_ROLE_KEY || '').trim();
+const useSupabase = !!(SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY);
+const supabase = useSupabase
+  ? createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
+      auth: { persistSession: false, autoRefreshToken: false },
+    })
+  : null;
 const MAX_PLAYERS = Math.max(1, parseInt(process.env.MAX_PLAYERS || '10000', 10) || 10000);
 const NPC_COUNT = Math.max(0, parseInt(process.env.NPC_COUNT || '16', 10) || 16);
 const VERSION = '3d-v4';
@@ -308,37 +317,151 @@ function ensureDataDir() {
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 }
 
-function loadData() {
+function stripTransient(p) {
+  const { id, cooldowns, emote, emoteUntil, sleeping, bribeGuardId, bribeUntil, ...rest } = p;
+  return { ...rest, cooldowns: {}, sleeping: false, emote: null, bribeGuardId: null, bribeUntil: 0 };
+}
+
+function loadDataFromJson() {
+  ensureDataDir();
+  if (!fs.existsSync(DATA_FILE)) return;
+  const raw = JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
+  playersByNick = raw.players || raw || {};
+  if (Array.isArray(raw.letters)) {
+    letters.length = 0;
+    letters.push(...raw.letters.slice(-MAX_LETTERS));
+  }
+}
+
+function leaderboardStatsRow(p) {
+  return {
+    nick_key: String(p.nickname || '').toLowerCase(),
+    nickname: p.nickname,
+    full_name: p.fullName || p.nickname,
+    money: Math.floor(p.money || 0),
+    rehab_points: p.rehabPoints || 0,
+    game_wins: p.gameWins || 0,
+    wins_caro: p.winsCaro || 0,
+    wins_rps: p.winsRps || 0,
+    days_served: p.daysServed || 0,
+    released: !!p.released,
+    updated_at: new Date().toISOString(),
+  };
+}
+
+async function loadDataFromSupabase() {
+  const { data: rows, error } = await supabase.from('players').select('nick_key, data');
+  if (error) throw error;
+  playersByNick = {};
+  for (const row of rows || []) {
+    if (row && row.nick_key && row.data && typeof row.data === 'object') {
+      playersByNick[row.nick_key] = row.data;
+    }
+  }
+  const { data: letterRows, error: le } = await supabase
+    .from('letters')
+    .select('id, nick, text, ts')
+    .order('ts', { ascending: false })
+    .limit(MAX_LETTERS);
+  if (le) throw le;
+  letters.length = 0;
+  if (Array.isArray(letterRows) && letterRows.length) {
+    const ordered = letterRows.slice().reverse();
+    letters.push(...ordered.map((l) => ({ id: l.id, nick: l.nick, text: l.text, ts: Number(l.ts) })));
+  }
+  console.log(`[persist] Supabase: ${Object.keys(playersByNick).length} players, ${letters.length} letters`);
+}
+
+async function saveDataToSupabase() {
+  for (const p of online.values()) playersByNick[p.nickname.toLowerCase()] = stripTransient(p);
+  const playerRows = Object.entries(playersByNick).map(([nick_key, data]) => ({
+    nick_key,
+    data,
+    updated_at: new Date().toISOString(),
+  }));
+  if (playerRows.length) {
+    const { error } = await supabase.from('players').upsert(playerRows, { onConflict: 'nick_key' });
+    if (error) throw error;
+    const stats = playerRows
+      .map((r) => leaderboardStatsRow(r.data))
+      .filter((r) => r.nick_key);
+    if (stats.length) {
+      const { error: se } = await supabase.from('leaderboard_stats').upsert(stats, { onConflict: 'nick_key' });
+      if (se) console.error('[persist] leaderboard_stats', se.message);
+    }
+  }
+  const letterSlice = letters.slice(-MAX_LETTERS);
+  if (letterSlice.length) {
+    const { error: le } = await supabase.from('letters').upsert(
+      letterSlice.map((l) => ({ id: l.id, nick: l.nick, text: l.text, ts: l.ts })),
+      { onConflict: 'id' }
+    );
+    if (le) throw le;
+  }
+}
+
+function saveDataToJson() {
+  ensureDataDir();
+  for (const p of online.values()) playersByNick[p.nickname.toLowerCase()] = stripTransient(p);
+  fs.writeFileSync(
+    DATA_FILE,
+    JSON.stringify({ players: playersByNick, letters: letters.slice(-MAX_LETTERS) }, null, 2)
+  );
+}
+
+let saving = false;
+let saveQueued = false;
+
+async function saveData() {
+  if (saving) {
+    saveQueued = true;
+    return;
+  }
+  saving = true;
   try {
-    ensureDataDir();
-    if (fs.existsSync(DATA_FILE)) {
-      const raw = JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
-      playersByNick = raw.players || raw;
-      if (Array.isArray(raw.letters)) letters.push(...raw.letters.slice(-MAX_LETTERS));
+    if (useSupabase) await saveDataToSupabase();
+    else saveDataToJson();
+  } catch (e) {
+    console.error('Save error', e.message);
+    try {
+      saveDataToJson();
+    } catch (e2) {
+      console.error('JSON fallback save failed', e2.message);
+    }
+  } finally {
+    saving = false;
+    if (saveQueued) {
+      saveQueued = false;
+      void saveData();
+    }
+  }
+}
+
+async function loadData() {
+  try {
+    if (useSupabase) {
+      await loadDataFromSupabase();
+      if (!Object.keys(playersByNick).length && fs.existsSync(DATA_FILE)) {
+        const before = letters.length;
+        loadDataFromJson();
+        if (Object.keys(playersByNick).length || letters.length > before) {
+          console.log('[persist] migrating local JSON → Supabase');
+          await saveDataToSupabase();
+        }
+      }
+    } else {
+      loadDataFromJson();
+      console.log('[persist] JSON fallback (set SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY)');
     }
   } catch (e) {
     console.error('Load error', e.message);
     playersByNick = {};
+    try {
+      loadDataFromJson();
+      console.log('[persist] recovered from local JSON after load error');
+    } catch (_) {}
   }
 }
-
-function stripTransient(p) {
-  const { id, cooldowns, emote, emoteUntil, sleeping, ...rest } = p;
-  return { ...rest, cooldowns: {}, sleeping: false, emote: null };
-}
-
-function saveData() {
-  try {
-    ensureDataDir();
-    for (const p of online.values()) playersByNick[p.nickname.toLowerCase()] = stripTransient(p);
-    fs.writeFileSync(DATA_FILE, JSON.stringify({ players: playersByNick, letters: letters.slice(-MAX_LETTERS) }, null, 2));
-  } catch (e) {
-    console.error('Save error', e.message);
-  }
-}
-
-loadData();
-setInterval(saveData, 15000);
 
 function currentSchedule() {
   const phase = SCHEDULE[scheduleIndex];
@@ -1305,6 +1428,14 @@ app.get('/api/health', (_req, res) => {
 
 setInterval(tickGuards, 900);
 
-server.listen(PORT, '0.0.0.0', () => {
-  console.log(`Ở tù online ${VERSION} listening on http://0.0.0.0:${PORT} (max ${MAX_PLAYERS})`);
+(async () => {
+  await loadData();
+  setInterval(() => { void saveData(); }, 15000);
+  server.listen(PORT, '0.0.0.0', () => {
+    console.log(`Ở tù online listening on http://0.0.0.0:${PORT} (${VERSION}) max=${MAX_PLAYERS} persist=${useSupabase ? 'supabase' : 'json'}`);
+  });
+})().catch((e) => {
+  console.error('Boot failed', e);
+  process.exit(1);
 });
+

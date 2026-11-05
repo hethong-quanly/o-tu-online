@@ -16,3 +16,6 @@ android-webview/.idea/
 node_modules/
 *.log
 cloudflared
+
+.render-env
+.env.local
