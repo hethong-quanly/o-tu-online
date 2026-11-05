@@ -1,10 +1,91 @@
 {
-  "version": "3d-v8",
+  "version": "3d-v9",
   "budgetBytes": 15000000,
   "characters": {
-    "prisoner_orange": { "url": "/assets/characters/prisoner_worker.glb", "tint": "orange", "anims": ["Idle", "Walk", "Run", "Wave", "Interact"] },
-    "prisoner_stripe": { "url": "/assets/characters/prisoner_casual.glb", "tint": "stripe", "anims": ["Idle", "Walk", "Run", "Wave", "Interact"] },
-    "guard": { "url": "/assets/characters/guard_swat.glb", "tint": "police", "anims": ["Idle", "Walk", "Run", "Wave", "Interact"] }
+    "prisoner_orange": {
+      "url": "/assets/characters/prisoner_worker.glb",
+      "tint": "orange",
+      "gender": "male",
+      "anims": [
+        "Idle",
+        "Walk",
+        "Run",
+        "Wave",
+        "Interact"
+      ]
+    },
+    "prisoner_stripe": {
+      "url": "/assets/characters/prisoner_casual.glb",
+      "tint": "stripe",
+      "gender": "male",
+      "anims": [
+        "Idle",
+        "Walk",
+        "Run",
+        "Wave",
+        "Interact"
+      ]
+    },
+    "prisoner_f_casual": {
+      "url": "/assets/characters/prisoner_f_casual.glb",
+      "tint": "stripe",
+      "gender": "female",
+      "anims": [
+        "Idle",
+        "Walk",
+        "Run",
+        "Wave",
+        "Interact"
+      ]
+    },
+    "prisoner_f_worker": {
+      "url": "/assets/characters/prisoner_f_worker.glb",
+      "tint": "orange",
+      "gender": "female",
+      "anims": [
+        "Idle",
+        "Walk",
+        "Run",
+        "Wave",
+        "Interact"
+      ]
+    },
+    "prisoner_f_punk": {
+      "url": "/assets/characters/prisoner_f_punk.glb",
+      "tint": "stripe",
+      "gender": "female",
+      "anims": [
+        "Idle",
+        "Walk",
+        "Run",
+        "Wave",
+        "Interact"
+      ]
+    },
+    "prisoner_f_formal": {
+      "url": "/assets/characters/prisoner_f_formal.glb",
+      "tint": "stripe",
+      "gender": "female",
+      "anims": [
+        "Idle",
+        "Walk",
+        "Run",
+        "Wave",
+        "Interact"
+      ]
+    },
+    "guard": {
+      "url": "/assets/characters/guard_swat.glb",
+      "tint": "police",
+      "gender": "any",
+      "anims": [
+        "Idle",
+        "Walk",
+        "Run",
+        "Wave",
+        "Interact"
+      ]
+    }
   },
   "props": {
     "bedBunk": "/assets/props/bedBunk.glb",
@@ -54,10 +135,53 @@
     "anvil": "/assets/props/workbench-anvil.glb"
   },
   "zonesLazy": {
-    "labor": ["carrot", "pumpkin", "turnip", "corn", "dirtRow", "workbench", "anvil", "crateLarge", "crateSmall", "barrel", "bucket", "cog"],
-    "kitchen": ["fridge", "fridgeLarge", "sink", "stove", "kitchenCabinet", "pan", "pot", "plate", "spatula", "knife"],
-    "happiness": ["sofa", "sofaDesign", "lamp", "plant", "rug", "tv", "tableCoffee", "flower"],
-    "canteen": ["table", "chair", "bench"],
-    "quarantine": ["bedBunk", "bedSingle", "desk", "chairDesk", "cabinet"]
+    "labor": [
+      "carrot",
+      "pumpkin",
+      "turnip",
+      "corn",
+      "dirtRow",
+      "workbench",
+      "anvil",
+      "crateLarge",
+      "crateSmall",
+      "barrel",
+      "bucket",
+      "cog"
+    ],
+    "kitchen": [
+      "fridge",
+      "fridgeLarge",
+      "sink",
+      "stove",
+      "kitchenCabinet",
+      "pan",
+      "pot",
+      "plate",
+      "spatula",
+      "knife"
+    ],
+    "happiness": [
+      "sofa",
+      "sofaDesign",
+      "lamp",
+      "plant",
+      "rug",
+      "tv",
+      "tableCoffee",
+      "flower"
+    ],
+    "canteen": [
+      "table",
+      "chair",
+      "bench"
+    ],
+    "quarantine": [
+      "bedBunk",
+      "bedSingle",
+      "desk",
+      "chairDesk",
+      "cabinet"
+    ]
   }
 }

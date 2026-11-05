@@ -1,4 +1,4 @@
-/* 3d-v8 — procedural fallback + glTF characters/props (CC0) */
+/* 3d-v9 — country uniforms + gender bodies (Quaternius Men/Women CC0) + glTF/procedural */
 import * as THREE from 'three';
 import { AssetLibrary } from './asset-lib.js';
 
@@ -122,25 +122,32 @@ import { AssetLibrary } from './asset-lib.js';
   function uniformTexture(stripeId, number) {
     const isOrange = stripeId === 'orange' || stripeId === 'orange_solid';
     const isPolice = stripeId === 'police';
-    const light = isPolice ? '#2a4a7a' : (stripeId === 'blue' ? '#e8f0ff' : (isOrange ? '#ff8a2a' : '#f5f5f5'));
-    const dark = isPolice ? '#0d1b2a' : (stripeId === 'blue' ? '#1a3050' : (isOrange ? '#e06010' : '#151515'));
+    const isBrown = stripeId === 'brown';
+    const isBlue = stripeId === 'blue' || stripeId === 'blue_white';
+    // Vertical body stripes → bands vary in X
+    const light = isPolice ? '#2f5a32' : (isBlue ? '#e8f0ff' : (isOrange ? '#ff8a2a' : (isBrown ? '#8b5a2b' : '#f5f5f5')));
+    const dark = isPolice ? '#1a3018' : (isBlue ? '#1a4060' : (isOrange ? '#e06010' : (isBrown ? '#5a3a1a' : '#151515')));
     return makeCanvasTex((ctx, w, h) => {
-      if (isOrange) {
+      if (isOrange || isBrown || isPolice) {
         ctx.fillStyle = light;
         ctx.fillRect(0, 0, w, h);
-        // folds
         for (let i = 0; i < 6; i++) {
-          ctx.fillStyle = 'rgba(180,60,0,0.18)';
+          ctx.fillStyle = isPolice ? 'rgba(0,0,0,0.12)' : 'rgba(0,0,0,0.14)';
           ctx.fillRect(8 + i * 9, 0, 3, h);
         }
+        if (isPolice) {
+          ctx.fillStyle = '#b01020';
+          ctx.fillRect(0, 0, w, 4);
+        }
       } else {
+        // vertical stripes (VN / CN)
         for (let i = 0; i < 8; i++) {
           ctx.fillStyle = i % 2 ? dark : light;
-          ctx.fillRect(0, i * 8, w, 8);
+          ctx.fillRect(i * 8, 0, 8, h);
         }
         for (let i = 0; i < 5; i++) {
-          ctx.fillStyle = 'rgba(0,0,0,0.12)';
-          ctx.fillRect(10 + i * 10, 0, 2, h);
+          ctx.fillStyle = 'rgba(0,0,0,0.1)';
+          ctx.fillRect(0, 10 + i * 10, w, 2);
         }
       }
       // number patch
@@ -203,15 +210,24 @@ import { AssetLibrary } from './asset-lib.js';
     const g = new THREE.Group();
     const skin = new THREE.Color(appearance.skin || '#e8b896');
     const hair = new THREE.Color(appearance.hair || '#2a2218');
-    const stripeId = appearance.stripe || 'orange';
+    const countryMap = { vn: 'bw', us: 'orange', cn: 'blue', other: 'brown' };
+    let stripeId = appearance.stripe || 'bw';
+    if (appearance.country && countryMap[appearance.country] && stripeId !== 'police') {
+      stripeId = countryMap[appearance.country];
+    }
     const isOrange = stripeId === 'orange' || stripeId === 'orange_solid';
     const isPolice = stripeId === 'police';
+    const isBrown = stripeId === 'brown';
     const skinMat = mat(skin.getHex());
     const hairMat = mat(hair.getHex());
     const uniMap = uniformTexture(stripeId, opts.number || appearance.number || '007');
     const bodyMat = new THREE.MeshLambertMaterial({ map: uniMap });
-    const pantsMat = isPolice ? mat(0x3a5a3a) : (isOrange ? mat(0xe06010) : bodyMat);
+    const pantsMat = isPolice ? mat(0x2f5a32) : ((isOrange || isBrown) ? bodyMat : bodyMat);
     const shoeMat = mat(isPolice ? 0x1a1a1a : 0x2a2218);
+    // Slightly narrower torso for female/nu procedural
+    const female = (appearance.gender === 'nu') || appearance.bodyStyle === 'female' || appearance.body === 'female';
+    const torsoW = female ? 0.5 : 0.58;
+    const hipScale = female ? 0.95 : 1;
 
     // hips root for animation
     const hips = new THREE.Group(); hips.name = 'hips'; g.add(hips);
@@ -231,7 +247,7 @@ import { AssetLibrary } from './asset-lib.js';
     shinR.add(mesh(geo('foot', () => new THREE.BoxGeometry(0.22, 0.1, 0.34)), shoeMat, 0, -0.38, 0.04));
 
     const torso = new THREE.Group(); torso.position.set(0, 0.55, 0); hips.add(torso);
-    const body = mesh(geo('torso', () => new THREE.BoxGeometry(0.58, 0.62, 0.36)), bodyMat, 0, 0.32, 0);
+    const body = mesh(geo('torso', () => new THREE.BoxGeometry(torsoW, 0.62, 0.36)), bodyMat, 0, 0.32, 0);
     torso.add(body);
     // collar / folds accent
     torso.add(mesh(geo('collar', () => new THREE.BoxGeometry(0.5, 0.08, 0.38)), mat(isOrange ? 0xffaa55 : 0xcccccc), 0, 0.62, 0.02, false));
@@ -264,12 +280,20 @@ import { AssetLibrary } from './asset-lib.js';
     head.add(mesh(geo('ear', () => new THREE.SphereGeometry(0.06, 8, 6)), skinMat, 0.28, 0.06, 0, false));
 
     if (isPolice) {
-      const cap = mesh(geo('cap', () => new THREE.CylinderGeometry(0.26, 0.28, 0.12, 12)), mat(0x3a5a3a), 0, 0.34, 0);
+      const cap = mesh(geo('cap', () => new THREE.CylinderGeometry(0.26, 0.28, 0.12, 12)), mat(0x2f5a32), 0, 0.34, 0);
       head.add(cap);
-      head.add(mesh(geo('brim', () => new THREE.BoxGeometry(0.4, 0.04, 0.22)), mat(0x2a3a2a), 0, 0.28, 0.14, false));
-      head.add(mesh(geo('badge', () => new THREE.BoxGeometry(0.08, 0.08, 0.03)), mat(0xd4a857), 0, 0.36, 0.26, false));
-      torso.add(mesh(geo('patch', () => new THREE.BoxGeometry(0.12, 0.14, 0.03)), mat(0xb02020), -0.18, 0.55, 0.18, false));
-      torso.add(mesh(geo('patch', () => new THREE.BoxGeometry(0.12, 0.14, 0.03)), mat(0xb02020), 0.18, 0.55, 0.18, false));
+      head.add(mesh(geo('brim', () => new THREE.BoxGeometry(0.4, 0.04, 0.22)), mat(0x1a1a1a), 0, 0.28, 0.14, false));
+      head.add(mesh(geo('band', () => new THREE.CylinderGeometry(0.275, 0.275, 0.04, 16)), mat(0xb01020), 0, 0.30, 0, false));
+      head.add(mesh(geo('badge', () => new THREE.CircleGeometry(0.05, 10)), mat(0xd4a857), 0, 0.36, 0.26, false));
+      torso.add(mesh(geo('board', () => new THREE.BoxGeometry(0.1, 0.04, 0.14)), mat(0x1a3018), -0.28, 0.58, 0.05, false));
+      torso.add(mesh(geo('board', () => new THREE.BoxGeometry(0.1, 0.04, 0.14)), mat(0x1a3018), 0.28, 0.58, 0.05, false));
+      torso.add(mesh(geo('pip', () => new THREE.BoxGeometry(0.06, 0.015, 0.02)), mat(0xd4a857), -0.28, 0.61, 0.05, false));
+      torso.add(mesh(geo('pip', () => new THREE.BoxGeometry(0.06, 0.015, 0.02)), mat(0xd4a857), 0.28, 0.61, 0.05, false));
+    }
+    // LGBT rainbow badge (procedural)
+    if (appearance.gender === 'lgbt' && appearance.rainbowBadge !== false && !isPolice) {
+      const badge = mesh(geo('rainbow', () => new THREE.BoxGeometry(0.1, 0.06, 0.02)), mat(0xe40303), 0.2, 0.5, 0.19, false);
+      torso.add(badge);
     }
 
     g.userData.kind = isPolice ? 'guard' : 'prisoner';
@@ -289,19 +313,23 @@ import { AssetLibrary } from './asset-lib.js';
   function createCharacterSmart(appearance, opts) {
     opts = opts || {};
     appearance = appearance || {};
+    const countryMap = { vn: 'bw', us: 'orange', cn: 'blue', other: 'brown' };
+    if (appearance.country && countryMap[appearance.country] && appearance.stripe !== 'police') {
+      appearance = Object.assign({}, appearance, { stripe: countryMap[appearance.country] });
+    }
     const lib = window.__otuAssets;
     if (lib && lib.ready) {
       try {
-        const g = lib.createCharacter(opts.role === 'guard' ? 'guard' : 'prisoner', {
+        const role = opts.role || (appearance.stripe === 'police' ? 'guard' : 'prisoner');
+        const g = lib.createCharacter(role === 'guard' ? 'guard' : 'prisoner', {
           appearance,
           number: opts.number || appearance.number,
           stripe: appearance.stripe,
-          role: opts.role || (appearance.stripe === 'police' ? 'guard' : 'prisoner'),
+          role,
           shadows: !(window.__otuIsMobile),
-          tint: appearance.stripe === 'police' ? 'police' : (appearance.stripe === 'blue_white' || appearance.stripe === 'stripe' || appearance.stripe === 'bw' ? 'stripe' : 'orange'),
         });
         if (g) {
-          g.userData.kind = opts.role === 'guard' || appearance.stripe === 'police' ? 'guard' : 'prisoner';
+          g.userData.kind = role === 'guard' || appearance.stripe === 'police' ? 'guard' : 'prisoner';
           return g;
         }
       } catch (e) { console.warn('gltf char fail', e); }
@@ -882,12 +910,20 @@ import { AssetLibrary } from './asset-lib.js';
     ];
     for (let i = 0; i < n; i++) {
       const name = FUNNY_NPC_NAMES[i % FUNNY_NPC_NAMES.length] + (i >= FUNNY_NPC_NAMES.length ? ' ' + (i + 1) : '');
-      const stripe = i % 3 === 0 ? 'bw' : (i % 3 === 1 ? 'orange' : 'blue');
+      const countries = ['vn', 'us', 'cn', 'other'];
+      const country = countries[i % countries.length];
+      const stripe = { vn: 'bw', us: 'orange', cn: 'blue', other: 'brown' }[country];
+      const genders = ['nam', 'nu', 'lgbt', 'nam', 'nu'];
+      const gender = genders[i % genders.length];
+      const bodyStyle = gender === 'nu' ? 'female' : (gender === 'lgbt' ? (i % 2 ? 'female' : 'male') : 'male');
+      const hairStyles = ['default', 'short', 'long', 'bun', 'worker'];
       const skins = ['#e8b896', '#c68642', '#f1c27d', '#8d5524', '#ffdbac'];
       const hairs = ['#2a2218', '#1a1a1a', '#5a3a1a', '#c4a35a', '#708090'];
       const meshP = createLivelyPrisoner({
         skin: skins[i % skins.length],
         hair: hairs[i % hairs.length],
+        country, gender, bodyStyle, hairStyle: hairStyles[i % hairStyles.length],
+        rainbowBadge: gender === 'lgbt',
         stripe,
         number: String(1000 + i * 37),
       }, { npc: true, expression: 'smile' });
@@ -976,7 +1012,7 @@ import { AssetLibrary } from './asset-lib.js';
 
   World3D.prototype.ensurePlayer = function (p) {
     let meshP = this.players.get(p.id);
-    const key = (p.appearance && (p.appearance.stripe + p.appearance.skin + p.appearance.hair)) || '';
+    const key = (p.appearance && [p.appearance.stripe, p.appearance.skin, p.appearance.hair, p.appearance.country, p.appearance.gender, p.appearance.bodyStyle, p.appearance.hairStyle].join('|')) || '';
     const mk = () => createLivelyPrisoner(Object.assign({}, p.appearance || {}, { number: p.prisonerNo }), { expression: 'smile' });
     if (!meshP) {
       meshP = mk();

@@ -19,7 +19,7 @@ const supabase = useSupabase
   : null;
 const MAX_PLAYERS = Math.max(1, parseInt(process.env.MAX_PLAYERS || '10000', 10) || 10000);
 const NPC_COUNT = Math.max(0, parseInt(process.env.NPC_COUNT || '16', 10) || 16);
-const VERSION = '3d-v8';
+const VERSION = '3d-v9';
 
 /** Guard NPCs — patrol, vision, bribe window (in-game money only) */
 const GUARD_DEFS = [
@@ -233,13 +233,35 @@ function rescaleCells() {
 const APPEARANCE = {
   skins: ['#e0b090', '#c68642', '#8d5524', '#f1c27d', '#ffdbac'],
   hairs: ['#2a2218', '#1a1a1a', '#5a3a1a', '#c4a35a', '#4a2020', '#708090'],
+  countries: [
+    { id: 'vn', name: 'Việt Nam', uniform: 'bw', desc: 'Sọc đen–trắng dọc' },
+    { id: 'us', name: 'Mỹ', uniform: 'orange', desc: 'Áo liền cam' },
+    { id: 'cn', name: 'Trung Quốc', uniform: 'blue', desc: 'Sọc xanh–trắng' },
+    { id: 'other', name: 'Khác', uniform: 'brown', desc: 'Nguyên bộ nâu' },
+  ],
+  genders: [
+    { id: 'nam', name: 'Nam', body: 'male' },
+    { id: 'nu', name: 'Nữ', body: 'female' },
+    { id: 'lgbt', name: 'LGBT', body: 'either' },
+  ],
+  hairStyles: [
+    { id: 'default', name: 'Mặc định' },
+    { id: 'short', name: 'Ngắn / Punk' },
+    { id: 'long', name: 'Dài' },
+    { id: 'bun', name: 'Buộc / Formal' },
+    { id: 'worker', name: 'Công nhân' },
+  ],
+  // legacy stripe ids still accepted; country drives uniform for new chars
   stripes: [
-    { id: 'orange', light: '#ff7a1a', dark: '#e86810', name: 'Áo cam' },
-    { id: 'bw', light: '#f5f5f5', dark: '#151515', name: 'Sọc trắng–đen' },
-    { id: 'blue', light: '#e8f0ff', dark: '#1a3050', name: 'Sọc xanh' },
-    { id: 'police', light: '#2a4a7a', dark: '#0d1b2a', name: 'Đồng phục quản giáo' },
+    { id: 'bw', light: '#f5f5f5', dark: '#151515', name: 'Sọc VN' },
+    { id: 'orange', light: '#ff7a1a', dark: '#e86810', name: 'Áo cam Mỹ' },
+    { id: 'blue', light: '#e8f0ff', dark: '#1a3050', name: 'Sọc TQ' },
+    { id: 'brown', light: '#8b5a2b', dark: '#5a3a1a', name: 'Nâu' },
+    { id: 'police', light: '#2f5a32', dark: '#1a3018', name: 'Quản giáo VN' },
   ],
 };
+
+const COUNTRY_TO_STRIPE = { vn: 'bw', us: 'orange', cn: 'blue', other: 'brown' };
 
 const CRIMES = [
   { id: 'karaoke', label: 'Hát karaoke quá giờ quy định' },
@@ -297,8 +319,27 @@ function normalizeAppearance(a) {
   a = a || {};
   const skin = APPEARANCE.skins.includes(a.skin) ? a.skin : APPEARANCE.skins[0];
   const hair = APPEARANCE.hairs.includes(a.hair) ? a.hair : APPEARANCE.hairs[0];
-  const stripe = APPEARANCE.stripes.find((s) => s.id === a.stripe) || APPEARANCE.stripes[0];
-  return { skin, hair, stripe: stripe.id };
+  const country = (APPEARANCE.countries.find((c) => c.id === a.country) || APPEARANCE.countries[0]).id;
+  const gender = (APPEARANCE.genders.find((g) => g.id === a.gender) || APPEARANCE.genders[0]).id;
+  let bodyStyle = a.bodyStyle || a.body || null;
+  if (gender === 'nam') bodyStyle = 'male';
+  else if (gender === 'nu') bodyStyle = 'female';
+  else if (bodyStyle === 'nu' || bodyStyle === 'female') bodyStyle = 'female';
+  else if (bodyStyle === 'nam' || bodyStyle === 'male') bodyStyle = 'male';
+  else bodyStyle = bodyStyle === 'female' ? 'female' : 'male';
+  const hairStyle = (APPEARANCE.hairStyles.find((h) => h.id === a.hairStyle) || APPEARANCE.hairStyles[0]).id;
+  const rainbowBadge = gender === 'lgbt' ? (a.rainbowBadge !== false) : false;
+  // stripe: police wins; else derive from country (ignore free stripe picker for prisoners)
+  let stripeId = a.stripe;
+  if (stripeId === 'police') {
+    /* keep */
+  } else {
+    stripeId = COUNTRY_TO_STRIPE[country] || 'bw';
+  }
+  if (!APPEARANCE.stripes.find((s) => s.id === stripeId)) stripeId = 'bw';
+  return {
+    skin, hair, country, gender, bodyStyle, hairStyle, rainbowBadge, stripe: stripeId,
+  };
 }
 
 function ratingFromPoints(pts) {

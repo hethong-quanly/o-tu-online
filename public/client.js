@@ -8,7 +8,7 @@
   let me = null;
   let world = { players: [], roomCounts: {}, leaderboard: { wins: [], rehab: [], earlyRelease: [] }, onlineCount: 0, npcCount: 16, letters: [], schedule: null, totalDaysMarked: 0 };
   let sideMode = null;
-  let appearance = { skin: '#e8b896', hair: '#2a2218', stripe: 'orange' };
+  let appearance = { skin: '#e8b896', hair: '#2a2218', country: 'vn', gender: 'nam', bodyStyle: 'male', hairStyle: 'default', rainbowBadge: false, stripe: 'bw' };
   let chatLines = [];
   let chatTab = 'all';
   let world3d = null;
@@ -63,6 +63,30 @@
     };
   }
 
+  function countryLabel(id) {
+    const c = ((config.appearance && config.appearance.countries) || [
+      { id: 'vn', name: 'Việt Nam' }, { id: 'us', name: 'Mỹ' }, { id: 'cn', name: 'Trung Quốc' }, { id: 'other', name: 'Khác' },
+    ]).find((x) => x.id === id);
+    return c ? c.name : id;
+  }
+  function genderLabel(id) {
+    const g = ((config.appearance && config.appearance.genders) || [
+      { id: 'nam', name: 'Nam' }, { id: 'nu', name: 'Nữ' }, { id: 'lgbt', name: 'LGBT' },
+    ]).find((x) => x.id === id);
+    return g ? g.name : id;
+  }
+  function syncUniformFromCountry() {
+    const map = { vn: 'bw', us: 'orange', cn: 'blue', other: 'brown' };
+    appearance.stripe = map[appearance.country] || 'bw';
+    const hints = {
+      vn: 'Đồng phục: quần áo sọc đen–trắng dọc (VN) · không nón',
+      us: 'Đồng phục: nguyên bộ cam (Mỹ) · không nón',
+      cn: 'Đồng phục: sọc xanh–trắng (TQ) · không nón',
+      other: 'Đồng phục: nguyên bộ nâu · không nón',
+    };
+    const el = $('#uniform-hint');
+    if (el) el.textContent = hints[appearance.country] || hints.vn;
+  }
   function updatePreviewCard() {
     const saved = loadGuest();
     $('#pv-no').textContent = (saved && saved.prisonerNo) || 'OT-????';
@@ -75,23 +99,60 @@
     const sent = (config.sentences || []).find((s) => s.id === $('#sentence').value);
     $('#pv-sent').textContent = sent ? sent.label : '—';
     $('#pv-rate').textContent = 'Kém (mới vào)';
+    const pvc = $('#pv-country'); if (pvc) pvc.textContent = countryLabel(appearance.country);
+    const pvg = $('#pv-gender'); if (pvg) pvg.textContent = genderLabel(appearance.gender);
   }
 
   function buildSwatches() {
     const skins = (config.appearance && config.appearance.skins) || ['#e8b896', '#c68642', '#8d5524', '#f1c27d', '#ffdbac'];
     const hairs = (config.appearance && config.appearance.hairs) || ['#2a2218', '#1a1a1a', '#5a3a1a', '#c4a35a', '#4a2020', '#708090'];
-    const stripes = (config.appearance && config.appearance.stripes) || [
-      { id: 'orange', name: 'Áo cam' },
-      { id: 'bw', name: 'Sọc trắng–đen' },
-      { id: 'blue', name: 'Sọc xanh' },
+    const countries = (config.appearance && config.appearance.countries) || [
+      { id: 'vn', name: 'Việt Nam' }, { id: 'us', name: 'Mỹ' }, { id: 'cn', name: 'Trung Quốc' }, { id: 'other', name: 'Khác' },
     ];
-    const skinEl = $('#skin-swatches'), hairEl = $('#hair-swatches'), stripeEl = $('#stripe-swatches');
-    skinEl.innerHTML = skins.map((c) => `<button type="button" class="${appearance.skin === c ? 'on' : ''}" data-skin="${c}" style="background:${c}"></button>`).join('');
-    hairEl.innerHTML = hairs.map((c) => `<button type="button" class="${appearance.hair === c ? 'on' : ''}" data-hair="${c}" style="background:${c}"></button>`).join('');
-    stripeEl.innerHTML = stripes.map((s) => `<button type="button" class="${appearance.stripe === s.id ? 'on' : ''}" data-stripe="${s.id}">${s.name}</button>`).join('');
-    skinEl.querySelectorAll('[data-skin]').forEach((b) => b.onclick = () => { appearance.skin = b.dataset.skin; buildSwatches(); drawPreview(); });
-    hairEl.querySelectorAll('[data-hair]').forEach((b) => b.onclick = () => { appearance.hair = b.dataset.hair; buildSwatches(); drawPreview(); });
-    stripeEl.querySelectorAll('[data-stripe]').forEach((b) => b.onclick = () => { appearance.stripe = b.dataset.stripe; buildSwatches(); drawPreview(); });
+    const genders = (config.appearance && config.appearance.genders) || [
+      { id: 'nam', name: 'Nam' }, { id: 'nu', name: 'Nữ' }, { id: 'lgbt', name: 'LGBT' },
+    ];
+    const hairStyles = (config.appearance && config.appearance.hairStyles) || [
+      { id: 'default', name: 'Mặc định' }, { id: 'short', name: 'Ngắn' }, { id: 'long', name: 'Dài' }, { id: 'bun', name: 'Buộc' }, { id: 'worker', name: 'Công nhân' },
+    ];
+    syncUniformFromCountry();
+    const skinEl = $('#skin-swatches'), hairEl = $('#hair-swatches');
+    const countryEl = $('#country-swatches'), genderEl = $('#gender-swatches');
+    const bodyEl = $('#body-swatches'), styleEl = $('#hairstyle-swatches');
+    const bodyRow = $('#body-row');
+    if (skinEl) {
+      skinEl.innerHTML = skins.map((c) => `<button type="button" class="${appearance.skin === c ? 'on' : ''}" data-skin="${c}" style="background:${c}"></button>`).join('');
+      skinEl.querySelectorAll('[data-skin]').forEach((b) => b.onclick = () => { appearance.skin = b.dataset.skin; buildSwatches(); drawPreview(); updatePreviewCard(); });
+    }
+    if (hairEl) {
+      hairEl.innerHTML = hairs.map((c) => `<button type="button" class="${appearance.hair === c ? 'on' : ''}" data-hair="${c}" style="background:${c}"></button>`).join('');
+      hairEl.querySelectorAll('[data-hair]').forEach((b) => b.onclick = () => { appearance.hair = b.dataset.hair; buildSwatches(); drawPreview(); updatePreviewCard(); });
+    }
+    if (countryEl) {
+      countryEl.innerHTML = countries.map((c) => `<button type="button" class="${appearance.country === c.id ? 'on' : ''}" data-country="${c.id}">${c.name}</button>`).join('');
+      countryEl.querySelectorAll('[data-country]').forEach((b) => b.onclick = () => { appearance.country = b.dataset.country; syncUniformFromCountry(); buildSwatches(); drawPreview(); updatePreviewCard(); });
+    }
+    if (genderEl) {
+      genderEl.innerHTML = genders.map((g) => `<button type="button" class="${appearance.gender === g.id ? 'on' : ''}" data-gender="${g.id}">${g.name}</button>`).join('');
+      genderEl.querySelectorAll('[data-gender]').forEach((b) => b.onclick = () => {
+        appearance.gender = b.dataset.gender;
+        if (appearance.gender === 'nam') appearance.bodyStyle = 'male';
+        else if (appearance.gender === 'nu') appearance.bodyStyle = 'female';
+        appearance.rainbowBadge = appearance.gender === 'lgbt';
+        buildSwatches(); drawPreview(); updatePreviewCard();
+      });
+    }
+    if (bodyRow) bodyRow.hidden = appearance.gender !== 'lgbt';
+    if (bodyEl) {
+      bodyEl.innerHTML = [
+        { id: 'male', name: 'Nam' }, { id: 'female', name: 'Nữ' },
+      ].map((b) => `<button type="button" class="${appearance.bodyStyle === b.id ? 'on' : ''}" data-body="${b.id}">${b.name}</button>`).join('');
+      bodyEl.querySelectorAll('[data-body]').forEach((b) => b.onclick = () => { appearance.bodyStyle = b.dataset.body; buildSwatches(); drawPreview(); updatePreviewCard(); });
+    }
+    if (styleEl) {
+      styleEl.innerHTML = hairStyles.map((h) => `<button type="button" class="${appearance.hairStyle === h.id ? 'on' : ''}" data-hs="${h.id}">${h.name}</button>`).join('');
+      styleEl.querySelectorAll('[data-hs]').forEach((b) => b.onclick = () => { appearance.hairStyle = b.dataset.hs; buildSwatches(); drawPreview(); updatePreviewCard(); });
+    }
   }
 
   function drawPreview() {
@@ -654,6 +715,8 @@
       <div class="pcard-row"><span>Số hiệu</span><b>${escapeHtml(me.prisonerNo || '—')}</b></div>
       <div class="pcard-row"><span>Họ tên</span><b>${escapeHtml(me.fullName || me.nickname)}</b></div>
       <div class="pcard-row"><span>Biệt danh</span><b>${escapeHtml(me.nickname)}</b></div>
+      <div class="pcard-row"><span>Quốc gia</span><b>${escapeHtml(countryLabel((me.appearance && me.appearance.country) || 'vn'))}</b></div>
+      <div class="pcard-row"><span>Giới tính</span><b>${escapeHtml(genderLabel((me.appearance && me.appearance.gender) || 'nam'))}</b></div>
       <div class="pcard-row"><span>Tội danh</span><b>${escapeHtml(me.crimeLabel || '—')}</b></div>
       <div class="pcard-row"><span>Án còn lại</span><b>${me.sentenceLeftDays} ngày</b></div>
       <div class="pcard-row"><span>Xếp loại</span><b>${escapeHtml(me.rehabRatingLabel || 'Kém')}</b></div>

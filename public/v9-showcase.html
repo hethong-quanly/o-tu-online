@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="utf-8"/>
+<title>3d-v9 uniforms showcase</title>
+<style>
+  html,body{margin:0;background:#1a2228;color:#eee;font-family:system-ui,sans-serif}
+  #hud{position:fixed;left:12px;top:12px;z-index:2;background:rgba(0,0,0,.55);padding:8px 12px;border-radius:8px}
+  canvas{display:block;width:100vw;height:100vh}
+</style>
+<script type="importmap">
+{"imports":{"three":"/vendor/three.module.js","three/addons/":"/vendor/jsm/"}}
+</script>
+</head>
+<body>
+<div id="hud">loading…</div>
+<script type="module">
+import * as THREE from 'three';
+import { uniformFromAppearance, textureForUniform, applyUniform } from '/asset-lib.js';
+
+const hud = document.getElementById('hud');
+const only = new URLSearchParams(location.search).get('only');
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x2a3540);
+const camera = new THREE.PerspectiveCamera(40, innerWidth / innerHeight, 0.1, 100);
+camera.position.set(0, 1.35, only != null ? 3.4 : 7.8);
+const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+renderer.setSize(innerWidth, innerHeight);
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+document.body.appendChild(renderer.domElement);
+scene.add(new THREE.AmbientLight(0xffffff, 0.9));
+const sun = new THREE.DirectionalLight(0xfff5e6, 0.95);
+sun.position.set(4, 8, 6);
+scene.add(sun);
+const ground = new THREE.Mesh(new THREE.CircleGeometry(9, 32), new THREE.MeshLambertMaterial({ color: 0x3a454f }));
+ground.rotation.x = -Math.PI / 2;
+scene.add(ground);
+
+/** Procedural Quaternius-like body so screenshots do not wait on GLB network. */
+function makeBody(appearance, uid) {
+  const g = new THREE.Group();
+  const skin = new THREE.Color(appearance.skin || '#e0b090');
+  const hairC = new THREE.Color(appearance.hair || '#1a1a1a');
+  const female = appearance.gender === 'nu' || appearance.bodyStyle === 'female'
+    || (appearance.gender === 'lgbt' && appearance.bodyStyle === 'female');
+
+  const hipScale = female ? 1.08 : 1;
+  const shoulder = female ? 0.34 : 0.4;
+
+  // head
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.16, 16, 12), new THREE.MeshLambertMaterial({ color: skin, name: 'Skin' }));
+  head.position.y = 1.58;
+  head.name = 'Head';
+  g.add(head);
+  // hair cap (not a hat)
+  const hair = new THREE.Mesh(
+    female ? new THREE.SphereGeometry(0.17, 16, 10, 0, Math.PI * 2, 0, Math.PI * 0.55)
+           : new THREE.SphereGeometry(0.165, 12, 8, 0, Math.PI * 2, 0, Math.PI * 0.5),
+    new THREE.MeshLambertMaterial({ color: hairC, name: 'Hair' })
+  );
+  hair.position.y = 1.62;
+  g.add(hair);
+  if (female && (appearance.hairStyle === 'long' || appearance.hairStyle === 'bun' || appearance.hairStyle === 'formal')) {
+    const lock = new THREE.Mesh(new THREE.CapsuleGeometry(0.07, 0.28, 4, 8), new THREE.MeshLambertMaterial({ color: hairC, name: 'Hair' }));
+    lock.position.set(0, 1.35, -0.08);
+    g.add(lock);
+  }
+
+  // torso (shirt)
+  const torso = new THREE.Mesh(
+    new THREE.CapsuleGeometry(shoulder * 0.72, 0.42, 6, 10),
+    new THREE.MeshLambertMaterial({ color: 0xffffff, name: 'Shirt' })
+  );
+  torso.position.y = 1.15;
+  torso.name = 'Torso';
+  g.add(torso);
+
+  // hips / pants
+  const pants = new THREE.Mesh(
+    new THREE.CapsuleGeometry(0.22 * hipScale, 0.35, 6, 10),
+    new THREE.MeshLambertMaterial({ color: 0xffffff, name: 'Pants' })
+  );
+  pants.position.y = 0.62;
+  pants.name = 'Pants';
+  g.add(pants);
+
+  // arms
+  [-1, 1].forEach((s) => {
+    const arm = new THREE.Mesh(new THREE.CapsuleGeometry(0.055, 0.38, 4, 8), new THREE.MeshLambertMaterial({ color: 0xffffff, name: 'Sleeve' }));
+    arm.position.set(s * (shoulder + 0.02), 1.18, 0);
+    arm.rotation.z = s * 0.15;
+    g.add(arm);
+    const hand = new THREE.Mesh(new THREE.SphereGeometry(0.05, 8, 8), new THREE.MeshLambertMaterial({ color: skin, name: 'Skin' }));
+    hand.position.set(s * (shoulder + 0.05), 0.88, 0.02);
+    g.add(hand);
+  });
+
+  // legs
+  [-1, 1].forEach((s) => {
+    const leg = new THREE.Mesh(new THREE.CapsuleGeometry(0.07, 0.4, 4, 8), new THREE.MeshLambertMaterial({ color: 0xffffff, name: 'Pants' }));
+    leg.position.set(s * 0.1 * hipScale, 0.28, 0);
+    g.add(leg);
+    const boot = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.08, 0.16), new THREE.MeshLambertMaterial({ color: 0x2a2218, name: 'Boot' }));
+    boot.position.set(s * 0.1 * hipScale, 0.04, 0.02);
+    g.add(boot);
+  });
+
+  applyUniform(g, uid, appearance);
+
+  // number patch / police kit / badge via same helpers: re-import through dynamic path —
+  // recreate lightweight versions here
+  if (uid !== 'police') {
+    const c = document.createElement('canvas');
+    c.width = 128; c.height = 64;
+    const ctx = c.getContext('2d');
+    ctx.fillStyle = '#f5f5f5'; ctx.fillRect(0,0,128,64);
+    ctx.strokeStyle = '#222'; ctx.lineWidth = 4; ctx.strokeRect(2,2,124,60);
+    ctx.fillStyle = '#111'; ctx.font = 'bold 26px monospace';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(String(appearance._num || '000').slice(0,6), 64, 34);
+    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(0.28, 0.14), new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(c), transparent: true }));
+    mesh.position.set(0, 1.15, 0.28);
+    g.add(mesh);
+  } else {
+    // peaked cap
+    const cap = new THREE.Group();
+    const crown = new THREE.Mesh(new THREE.CylinderGeometry(0.17, 0.19, 0.11, 16), new THREE.MeshLambertMaterial({ color: 0x2f5a32 }));
+    cap.add(crown);
+    const brim = new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.035, 0.2), new THREE.MeshLambertMaterial({ color: 0x1a1a1a }));
+    brim.position.set(0, -0.05, 0.1); cap.add(brim);
+    const band = new THREE.Mesh(new THREE.TorusGeometry(0.185, 0.022, 8, 20), new THREE.MeshLambertMaterial({ color: 0xb01020 }));
+    band.rotation.x = Math.PI / 2; band.position.y = -0.02; cap.add(band);
+    const emblem = new THREE.Mesh(new THREE.CircleGeometry(0.045, 12), new THREE.MeshLambertMaterial({ color: 0xd4a857 }));
+    emblem.position.set(0, 0.02, 0.18); cap.add(emblem);
+    cap.position.set(0, 1.74, 0);
+    g.add(cap);
+    // shoulder boards
+    [[-0.22, 1.42, 0.05], [0.22, 1.42, 0.05]].forEach(([x, y, z], i) => {
+      const board = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.04, 0.18), new THREE.MeshLambertMaterial({ color: 0x1a3018 }));
+      board.position.set(x, y, z); board.rotation.z = i === 0 ? 0.25 : -0.25; g.add(board);
+    });
+  }
+
+  if (appearance.gender === 'lgbt' && appearance.rainbowBadge !== false) {
+    const c = document.createElement('canvas');
+    c.width = 64; c.height = 40;
+    const ctx = c.getContext('2d');
+    ['#e40303','#ff8c00','#ffed00','#008026','#24408e','#732982'].forEach((col, i) => {
+      ctx.fillStyle = col; ctx.fillRect(0, (i * 40) / 6, 64, 40 / 6 + 1);
+    });
+    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(0.12, 0.08), new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(c), transparent: true }));
+    mesh.position.set(0.22, 1.2, 0.26);
+    g.add(mesh);
+  }
+  return g;
+}
+
+const specs = [
+  { label: 'VN sọc dọc', appearance: { country:'vn', gender:'nam', hairStyle:'default', skin:'#e0b090', hair:'#1a1a1a', _num:'VN-01' } },
+  { label: 'Mỹ cam', appearance: { country:'us', gender:'nam', hairStyle:'default', skin:'#c68642', hair:'#2a2218', _num:'US-02' } },
+  { label: 'TQ xanh', appearance: { country:'cn', gender:'nu', hairStyle:'long', skin:'#f1c27d', hair:'#1a1a1a', _num:'CN-03' } },
+  { label: 'Khác nâu', appearance: { country:'other', gender:'nu', hairStyle:'short', skin:'#8d5524', hair:'#5a3a1a', _num:'OT-04' } },
+  { label: 'LGBT', appearance: { country:'vn', gender:'lgbt', bodyStyle:'female', hairStyle:'bun', rainbowBadge:true, skin:'#e8b896', hair:'#c4a35a', _num:'LG-05' } },
+  { label: 'Quản giáo', appearance: { stripe:'police', gender:'nam', skin:'#e0b090', hair:'#1a1a1a', _num:'QG' }, role:'guard' },
+];
+
+specs.forEach((sp, i) => {
+  if (only != null && String(i) !== String(only)) return;
+  const uid = uniformFromAppearance({ ...sp.appearance, role: sp.role });
+  const g = makeBody(sp.appearance, uid);
+  g.position.set(only != null ? 0 : (i - 2.5) * 1.55, 0, 0);
+  g.rotation.y = Math.PI * 0.12;
+  scene.add(g);
+  const c = document.createElement('canvas');
+  c.width = 256; c.height = 64;
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = 'rgba(0,0,0,0.55)'; ctx.fillRect(0,0,256,64);
+  ctx.fillStyle = '#fff'; ctx.font = 'bold 28px sans-serif'; ctx.textAlign = 'center';
+  ctx.fillText(sp.label, 128, 40);
+  const spr = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(c), transparent: true }));
+  spr.scale.set(1.2, 0.3, 1);
+  spr.position.set(only != null ? 0 : (i - 2.5) * 1.55, 2.05, 0);
+  scene.add(spr);
+});
+
+renderer.render(scene, camera);
+hud.textContent = '3d-v9 · VN / Mỹ / TQ / Khác / LGBT / Quản giáo';
+window.__v9Ready = true;
+// keep rendering a few frames for soft-webgl
+let n = 0;
+(function tick() {
+  renderer.render(scene, camera);
+  if (++n < 30) requestAnimationFrame(tick);
+})();
+</script>
+</body>
+</html>

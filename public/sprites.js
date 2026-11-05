@@ -6,10 +6,24 @@
   }
 
   const STRIPES = {
-    bw: { light: '#f5f5f5', dark: '#151515' },
-    blue: { light: '#e8f0ff', dark: '#1a3050' },
-    orange: { light: '#fff0e0', dark: '#6a3010' },
+    bw: { light: '#f5f5f5', dark: '#151515', mode: 'vstripe' },
+    blue: { light: '#e8f0ff', dark: '#1a4060', mode: 'vstripe' },
+    orange: { light: '#ff8a2a', dark: '#e06010', mode: 'solid' },
+    brown: { light: '#8b5a2b', dark: '#5a3a1a', mode: 'solid' },
+    police: { light: '#2f5a32', dark: '#1a3018', mode: 'solid' },
   };
+  const COUNTRY_STRIPE = { vn: 'bw', us: 'orange', cn: 'blue', other: 'brown' };
+
+  function fillUniform(ctx, x0, y0, w, h, stripe) {
+    if (stripe.mode === 'solid') {
+      px(ctx, x0, y0, w, h, stripe.light);
+      return;
+    }
+    // vertical stripes
+    for (let c = 0; c < w; c++) {
+      px(ctx, x0 + c, y0, 1, h, (c % 2 === 0) ? stripe.light : stripe.dark);
+    }
+  }
 
   function drawPrisoner(ctx, x, y, scale, opts) {
     opts = opts || {};
@@ -17,7 +31,9 @@
     const face = opts.facing == null ? 1 : opts.facing;
     const skin = opts.skin || '#e0b090';
     const hair = opts.hair || '#2a2218';
-    const stripe = STRIPES[opts.stripe] || STRIPES.bw;
+    let stripeId = opts.stripe;
+    if (opts.country && COUNTRY_STRIPE[opts.country] && stripeId !== 'police') stripeId = COUNTRY_STRIPE[opts.country];
+    const stripe = STRIPES[stripeId] || STRIPES.bw;
     const emote = opts.emote || null;
     ctx.save();
     ctx.translate(x, y);
@@ -32,9 +48,7 @@
       // reclining / sitting low
       px(ctx, -6, 6, 4, 3, '#1a1a1a');
       px(ctx, 2, 6, 4, 3, '#1a1a1a');
-      for (let i = 0; i < 7; i++) {
-        px(ctx, -6, -1 + i, 12, 1, i % 2 === 0 ? stripe.light : stripe.dark);
-      }
+      fillUniform(ctx, -6, -1, 12, 7, stripe);
       px(ctx, -8, 1, 2, 5, skin);
       px(ctx, 6, 1, 2, 5, skin);
       px(ctx, -4, -8, 8, 7, skin);
@@ -46,9 +60,7 @@
       }
     } else if (emote === 'pushup') {
       px(ctx, -10, 8, 20, 2, '#1a1a1a');
-      for (let i = 0; i < 5; i++) {
-        px(ctx, -8, 2 + i, 16, 1, i % 2 === 0 ? stripe.light : stripe.dark);
-      }
+      fillUniform(ctx, -8, 2, 16, 5, stripe);
       px(ctx, -11, 4, 3, 2, skin);
       px(ctx, 8, 4, 3, 2, skin);
       px(ctx, -4, -2, 8, 6, skin);
@@ -58,9 +70,7 @@
       px(ctx, 1, 8, 3, 6, '#1a1a1a');
       px(ctx, -5, 13, 4, 1.5, '#111');
       px(ctx, 1, 13, 4, 1.5, '#111');
-      for (let i = 0; i < 7; i++) {
-        px(ctx, -5, -2 + i, 10, 1, i % 2 === 0 ? stripe.light : stripe.dark);
-      }
+      fillUniform(ctx, -5, -2, 10, 7, stripe);
       if (emote === 'wave') {
         px(ctx, -7, -4, 2, 6, skin);
         px(ctx, 5, -8, 2, 8, skin);
@@ -82,6 +92,10 @@
         ctx.font = '2.5px monospace';
         ctx.textAlign = 'center';
         ctx.fillText(String(opts.number).slice(0, 3), 0, 3.5);
+      }
+      if (opts.gender === 'lgbt' && opts.rainbowBadge !== false) {
+        const cols = ['#e40303', '#ff8c00', '#ffed00', '#008026', '#24408e', '#732982'];
+        cols.forEach((c, i) => px(ctx, 4, -1 + i * 0.5, 2, 0.5, c));
       }
       if (emote === 'mark') {
         ctx.fillStyle = '#f0d28e';

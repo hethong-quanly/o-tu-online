@@ -33,7 +33,7 @@
     <div class="panel-card join-card login-card">
       <div class="lotus-ish" aria-hidden="true">⛓️</div>
       <h1 id="join-h">Ở tù online</h1>
-      <p class="sub">Trại 3D v7 · Bản đồ · Khu tạm giam · Lao động · Phòng hạnh phúc</p>
+      <p class="sub">Trại 3D v9 · Đồng phục theo quốc gia · Nam/Nữ/LGBT · Quản giáo</p>
       <label class="lbl" for="fullName">Họ và tên</label>
       <input id="fullName" maxlength="40" autocomplete="name" placeholder="VD: Nguyễn Văn Sọc" />
       <label class="lbl" for="nick">Biệt danh trong trại</label>
@@ -48,6 +48,22 @@
       <select id="sentence"></select>
       <div class="appear">
         <div class="appear-row">
+          <span class="lbl">Quốc gia</span>
+          <div class="swatches text" id="country-swatches"></div>
+        </div>
+        <div class="appear-row">
+          <span class="lbl">Giới tính</span>
+          <div class="swatches text" id="gender-swatches"></div>
+        </div>
+        <div class="appear-row" id="body-row" hidden>
+          <span class="lbl">Dáng người (LGBT)</span>
+          <div class="swatches text" id="body-swatches"></div>
+        </div>
+        <div class="appear-row">
+          <span class="lbl">Kiểu tóc</span>
+          <div class="swatches text" id="hairstyle-swatches"></div>
+        </div>
+        <div class="appear-row">
           <span class="lbl">Màu da</span>
           <div class="swatches" id="skin-swatches"></div>
         </div>
@@ -55,10 +71,7 @@
           <span class="lbl">Màu tóc</span>
           <div class="swatches" id="hair-swatches"></div>
         </div>
-        <div class="appear-row">
-          <span class="lbl">Đồng phục</span>
-          <div class="swatches text" id="stripe-swatches"></div>
-        </div>
+        <p class="meta" id="uniform-hint" style="margin:4px 0 0;font-size:12px;opacity:.85">Đồng phục: sọc đen–trắng dọc (VN) · không nón</p>
         <canvas id="preview-char" width="96" height="120" aria-hidden="true"></canvas>
       </div>
       <div class="profile-preview" id="profile-preview">
@@ -66,6 +79,8 @@
           <div class="pcard-h">THẺ TÙ NHÂN</div>
           <div class="pcard-row"><span>Số hiệu</span><b id="pv-no">OT-????</b></div>
           <div class="pcard-row"><span>Họ tên</span><b id="pv-name">—</b></div>
+          <div class="pcard-row"><span>Quốc gia</span><b id="pv-country">Việt Nam</b></div>
+          <div class="pcard-row"><span>Giới tính</span><b id="pv-gender">Nam</b></div>
           <div class="pcard-row"><span>Tội danh</span><b id="pv-crime">—</b></div>
           <div class="pcard-row"><span>Án</span><b id="pv-sent">—</b></div>
           <div class="pcard-row"><span>Xếp loại</span><b id="pv-rate">Kém</b></div>
@@ -199,7 +214,7 @@
       <h2>🎨 Credits / Giấy phép tài nguyên</h2>
       <p class="meta">3D assets (CC0 / attribution). Chi tiết đầy đủ: <code>ASSETS_LICENSES.md</code></p>
       <div id="credits-body" style="text-align:left;font-size:13px;line-height:1.45">
-        <p><b>Characters</b> — Quaternius <i>Ultimate Modular Men</i> (CC0): Idle/Walk/Run/Wave/Interact. Retextured/tinted for prisoner orange, B&amp;W stripes, VN police olive+red.</p>
+        <p><b>Characters</b> — Quaternius <i>Ultimate Modular Men</i> + <i>Ultimate Modular Women</i> (CC0): Idle/Walk/Run/Wave/Interact. Canvas fabric uniforms by country (VN vertical B/W, US orange, CN blue/white, other brown); VN police green + peaked cap for guards. Gender: Nam / Nữ / LGBT.</p>
         <p><b>Props / furniture / kitchen / garden / tools</b> — Kenney.nl CC0 (Furniture Kit, Food Kit, Nature Kit, etc.) via public mirrors.</p>
         <p><b>Engine</b> — Three.js (MIT). Draco decoder — Google Draco (Apache-2.0).</p>
         <p>Gameplay art fallback: procedural meshes if GLB fails to load. No Mixamo assets shipped (redistribution limits).</p>
