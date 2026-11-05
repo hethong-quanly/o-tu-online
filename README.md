@@ -42,3 +42,21 @@ Mở http://127.0.0.1:3847 (hoặc port trong biến môi trường `PORT`).
 ## API
 
 - `GET /api/health` — kiểm tra server
+
+
+## Chơi trên điện thoại
+
+### Android (APK)
+Tải file `o-tu-online.apk` từ [Releases](https://github.com/hethong-quanly/o-tu-online/releases) trên GitHub, mở trên máy và cho phép cài từ nguồn không xác định (debug/self-signed). App là WebView mở `https://o-tu-online.onrender.com`.
+
+### iOS (PWA — không có APK)
+Apple không cho cài APK. Trên iPhone/iPad:
+1. Mở Safari → vào https://o-tu-online.onrender.com
+2. Chạm nút **Chia sẻ** (Share)
+3. Chọn **Thêm vào Màn hình chính** (Add to Home Screen)
+4. Đặt tên **Ở tù online** → Thêm
+
+App sẽ mở dạng standalone (không thanh địa chỉ Safari). Cần mạng để chơi multiplayer.
+
+### PWA (Android Chrome / Edge)
+Mở trang game → trình đơn ⋮ → **Cài đặt ứng dụng** / **Add to Home screen**.

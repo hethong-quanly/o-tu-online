@@ -8,3 +8,11 @@ cloudflared
 .firebase/
 firebase-debug.log
 .firebaserc
+android-webview/.gradle/
+android-webview/build/
+android-webview/app/build/
+android-webview/local.properties
+android-webview/.idea/
+node_modules/
+*.log
+cloudflared

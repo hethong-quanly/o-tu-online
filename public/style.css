@@ -254,3 +254,25 @@ a { color: inherit; }
 }
 
 .escape-tips { text-align: left; color: var(--text-dim); font-size: 13.5px; line-height: 1.55; margin: 10px 0 16px; }
+
+/* PWA / phone polish */
+html { height: 100%; height: -webkit-fill-available; }
+body {
+  min-height: 100%;
+  min-height: -webkit-fill-available;
+  -webkit-user-select: none;
+  user-select: none;
+  touch-action: manipulation;
+}
+input, textarea { -webkit-user-select: text; user-select: text; touch-action: auto; }
+.botbar .btn { touch-action: manipulation; }
+@media (max-width: 420px) {
+  .botbar { gap: 4px; padding: 6px; bottom: calc(8px + var(--safe-b)); }
+  .btn.le .le-ten { font-size: 10.5px; }
+  .btn.le { min-width: 48px; min-height: 54px; }
+  .nick-pill { display: none; }
+  .join-card { margin: 12px; padding: 22px 18px; }
+}
+@media (display-mode: standalone), (display-mode: fullscreen) {
+  .topbar { padding-top: calc(14px + env(safe-area-inset-top)); }
+}
