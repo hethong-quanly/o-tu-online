@@ -117,7 +117,7 @@ function isTestNickKey(key) {
   const k = String(key || '').toLowerCase().trim();
   if (!k) return false;
   if (k === 'anh 3 trà cú' || k === 'công chúa') return false;
-  return /^(phuctest|alpha$|beta$|debug|sọc|soc3d|áoxanh|phúcshot|tùnhân|chibi|desk|mobi|diag|audio|bribe)/i.test(k);
+  return /^(phuctest|alpha$|beta$|debug|sọc|soc3d|áoxanh|phúcshot|tùnhân|chibi|desk|mob|diag|audio|bribe|test|smoke|bot)/i.test(k);
 }
 
 async function purgeTestAccounts() {
@@ -487,6 +487,10 @@ async function loadDataFromSupabase() {
 
 async function saveDataToSupabase() {
   for (const p of online.values()) playersByNick[p.nickname.toLowerCase()] = stripTransient(p);
+  // Never re-upsert smoke-test accounts
+  for (const key of Object.keys(playersByNick)) {
+    if (isTestNickKey(key)) delete playersByNick[key];
+  }
   const playerRows = Object.entries(playersByNick).map(([nick_key, data]) => ({
     nick_key,
     data,
@@ -1563,6 +1567,7 @@ app.get('/api/health', (_req, res) => {
     npcCount: NPC_COUNT,
     name: 'Ở tù online',
     version: VERSION,
+    persist: useSupabase ? 'supabase' : 'json',
   });
 });
 
