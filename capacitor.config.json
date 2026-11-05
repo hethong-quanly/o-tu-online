@@ -1,0 +1,13 @@
+{
+  "appId": "vn.otuonline.app",
+  "appName": "Ở tù online",
+  "webDir": "public",
+  "server": {
+    "url": "https://o-tu-online.onrender.com",
+    "cleartext": false
+  },
+  "android": {
+    "allowMixedContent": false
+  },
+  "plugins": {}
+}

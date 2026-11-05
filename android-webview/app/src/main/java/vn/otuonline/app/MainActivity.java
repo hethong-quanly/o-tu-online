@@ -1,4 +1,4 @@
-package vn.otu.online;
+package vn.otuonline.app;
 
 import android.annotation.SuppressLint;
 import android.os.Bundle;
@@ -33,7 +33,7 @@ public class MainActivity extends AppCompatActivity {
         s.setCacheMode(WebSettings.LOAD_DEFAULT);
         s.setMixedContentMode(WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE);
         // Help Socket.io / WebSocket
-        s.setUserAgentString(s.getUserAgentString() + " OTuOnlineApp/1.0");
+        s.setUserAgentString(s.getUserAgentString() + " OTuOnlineApp/2.0.0");
 
         webView.setWebChromeClient(new WebChromeClient());
         webView.setWebViewClient(new WebViewClient() {

@@ -30,3 +30,7 @@ android/local.properties
 android/.gradle/
 android/app/build/
 android-webview/local.properties
+
+# Built store artifacts (upload via GitHub Releases)
+# dist/android/*.aab
+# dist/android/*.apk
