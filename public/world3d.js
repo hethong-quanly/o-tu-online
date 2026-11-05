@@ -1,6 +1,7 @@
-/* global THREE */
-(function (global) {
-  'use strict';
+/* 3d-v8 — procedural fallback + glTF characters/props (CC0) */
+import * as THREE from 'three';
+import { AssetLibrary } from './asset-lib.js';
+
 
   const FUNNY_NPC_NAMES = [
     'Tý Lém', 'Sáu Còi', 'Cu Bin', 'Mít Ướt', 'Đậu Phộng', 'Tèo Mới',
@@ -197,7 +198,7 @@
     }, 80, 80, 1, 1);
   }
 
-  function createLivelyPrisoner(appearance, opts) {
+  function createProceduralPrisoner(appearance, opts) {
     opts = opts || {};
     const g = new THREE.Group();
     const skin = new THREE.Color(appearance.skin || '#e8b896');
@@ -281,11 +282,52 @@
   }
 
   function createLivelyGuard(name) {
-    return createLivelyPrisoner({ skin: '#e8b896', hair: '#1a1a1a', stripe: 'police' }, { npc: true, number: 'QG' });
+    return createCharacterSmart({ skin: '#e8b896', hair: '#1a1a1a', stripe: 'police' }, { npc: true, number: 'QG', role: 'guard' });
+  }
+
+  /** Prefer glTF (AssetLibrary); fall back to procedural lively mesh. */
+  function createCharacterSmart(appearance, opts) {
+    opts = opts || {};
+    appearance = appearance || {};
+    const lib = window.__otuAssets;
+    if (lib && lib.ready) {
+      try {
+        const g = lib.createCharacter(opts.role === 'guard' ? 'guard' : 'prisoner', {
+          appearance,
+          number: opts.number || appearance.number,
+          stripe: appearance.stripe,
+          role: opts.role || (appearance.stripe === 'police' ? 'guard' : 'prisoner'),
+          shadows: !(window.__otuIsMobile),
+          tint: appearance.stripe === 'police' ? 'police' : (appearance.stripe === 'blue_white' || appearance.stripe === 'stripe' || appearance.stripe === 'bw' ? 'stripe' : 'orange'),
+        });
+        if (g) {
+          g.userData.kind = opts.role === 'guard' || appearance.stripe === 'police' ? 'guard' : 'prisoner';
+          return g;
+        }
+      } catch (e) { console.warn('gltf char fail', e); }
+    }
+    return createProceduralPrisoner(appearance, opts);
+  }
+
+  // Back-compat alias
+  function createLivelyPrisoner(appearance, opts) {
+    return createCharacterSmart(appearance, opts);
   }
 
   function animateCharacter(g, dt, moving, emote) {
-    if (!g || !g.userData.limbs) return;
+    if (!g) return;
+    if (g.userData.gltf && g.userData.mixer) {
+      let anim = 'idle';
+      if (emote === 'pushup') anim = 'pushup';
+      else if (emote === 'sit' || emote === 'sleep') anim = emote === 'sleep' ? 'sleep' : 'sit';
+      else if (emote === 'wave') anim = 'wave';
+      else if (emote === 'work' || emote === 'sew' || emote === 'hammer') anim = emote === 'sew' ? 'sew' : (emote === 'hammer' ? 'hammer' : 'work');
+      else if (moving) anim = moving > 4.5 ? 'run' : 'walk';
+      if (g.userData.playAnim) g.userData.playAnim(anim);
+      g.userData.mixer.update(dt);
+      return;
+    }
+    if (!g.userData.limbs) return;
     const L = g.userData.limbs;
     g.userData.animT = (g.userData.animT || 0) + dt;
     const t = g.userData.animT;
@@ -496,9 +538,12 @@
 
     this.root = new THREE.Group();
     this.scene.add(this.root);
+    this.assets = null;
+    this._gltfDecorated = false;
     this.buildCompound();
     this.spawnNpcs(20);
     this.spawnGuards();
+    this._bootAssets();
 
     this._bindInput();
     this._onResize = () => {
@@ -518,6 +563,111 @@
     this.shadowsOn = !!on;
     this.renderer.shadowMap.enabled = this.shadowsOn;
     this.sun.castShadow = this.shadowsOn;
+  };
+
+
+  World3D.prototype._bootAssets = function () {
+    const self = this;
+    window.__otuIsMobile = /Mobi|Android/i.test(navigator.userAgent) || window.innerWidth < 700;
+    const lib = new AssetLibrary();
+    window.__otuAssets = lib;
+    this.assets = lib;
+    lib.init().then((ok) => {
+      if (!ok) {
+        console.warn('[v8] glTF assets unavailable — procedural fallback');
+        return;
+      }
+      self._upgradeCharactersToGltf();
+      self._decorateCompoundWithProps();
+      // lazy zones
+      ['labor', 'kitchen', 'happiness', 'canteen', 'quarantine'].forEach((z) => {
+        lib.ensureZone(z).then(() => self._decorateZone(z));
+      });
+    }).catch((e) => console.warn('[v8] asset boot', e));
+  };
+
+  World3D.prototype._upgradeCharactersToGltf = function () {
+    const lib = this.assets;
+    if (!lib || !lib.ready) return;
+    const upgrade = (meshP, role) => {
+      if (!meshP || meshP.userData.gltf) return meshP;
+      const parent = meshP.parent;
+      const pos = meshP.position.clone();
+      const rotY = meshP.rotation.y;
+      const ud = Object.assign({}, meshP.userData);
+      const appearance = { stripe: role === 'guard' ? 'police' : (ud.stripe || 'orange'), number: ud.prisonerNo };
+      const neu = createCharacterSmart(appearance, { role, number: ud.prisonerNo, shadows: this.shadowsOn });
+      if (!neu || !neu.userData.gltf) return meshP;
+      Object.assign(neu.userData, ud, { gltf: true });
+      neu.position.copy(pos);
+      neu.rotation.y = rotY;
+      if (parent) { parent.remove(meshP); parent.add(neu); }
+      return neu;
+    };
+    for (const [id, meshP] of [...this.players.entries()]) {
+      this.players.set(id, upgrade(meshP, 'prisoner'));
+    }
+    this.npcs = this.npcs.map((n) => upgrade(n, 'prisoner'));
+    this.guards = this.guards.map((g) => upgrade(g, 'guard'));
+  };
+
+  World3D.prototype._placeProp = function (key, x, y, z, scale, rotY) {
+    if (!this.assets) return null;
+    const inst = this.assets.createProp(key, { shadows: this.shadowsOn, scale: scale || 1, rotY: rotY || 0, x, y: y || 0, z });
+    if (inst) this.root.add(inst);
+    return inst;
+  };
+
+  World3D.prototype._decorateCompoundWithProps = function () {
+    if (this._gltfDecorated) return;
+    this._gltfDecorated = true;
+    // canteen tables/chairs already procedural; sprinkle glTF
+    this._decorateZone('canteen');
+  };
+
+  World3D.prototype._decorateZone = function (zoneId) {
+    const P = (k, x, z, s, r) => this._placeProp(k, x, 0, z, s, r);
+    if (zoneId === 'canteen') {
+      for (let i = 0; i < 4; i++) P('chair', -6 + i * 4, -1, 1.2, Math.PI);
+      P('table', 2, 4, 1.4, 0);
+    }
+    if (zoneId === 'kitchen') {
+      P('fridgeLarge', 30, 12, 1.2, 0);
+      P('stove', 26, 12, 1.1, 0);
+      P('sink', 28, 8, 1.1, 0);
+      P('kitchenCabinet', 32, 8, 1.1, Math.PI / 2);
+      P('pan', 26.5, 12.8, 0.8, 0);
+      P('pot', 27.2, 12.8, 0.8, 0);
+    }
+    if (zoneId === 'labor') {
+      for (let i = 0; i < 4; i++) for (let j = 0; j < 3; j++) {
+        P(['carrot', 'pumpkin', 'turnip', 'corn'][(i + j) % 4], -38 + i * 1.8, 16 + j * 1.8, 1.0, Math.random() * 6);
+      }
+      P('dirtRow', -34, 18, 1.2, 0);
+      P('workbench', -30, 7, 1.1, 0);
+      P('anvil', -28, 6, 1.0, 0);
+      P('crateLarge', -24, 16, 1.0, 0);
+      P('barrel', -22, 14, 1.0, 0);
+      P('bucket', -23, 15, 1.0, 0);
+      P('cog', -26, 17, 0.8, 0);
+    }
+    if (zoneId === 'happiness') {
+      P('sofa', 36, -10, 1.2, 0);
+      P('sofaDesign', 38, -7, 1.1, Math.PI / 2);
+      P('lamp', 34, -6, 1.0, 0);
+      P('plant', 39, -9, 1.2, 0);
+      P('tableCoffee', 36, -7, 1.1, 0);
+      P('rug', 36, -8, 1.5, 0);
+      P('flower', 37.5, -6, 1.0, 0);
+      P('tv', 36, -12.5, 1.0, 0);
+    }
+    if (zoneId === 'quarantine') {
+      P('bedBunk', -46, -12, 1.1, 0);
+      P('bedSingle', -42, -12, 1.1, Math.PI);
+      P('desk', -40, -4, 1.1, 0);
+      P('chairDesk', -40, -5.2, 1.1, 0);
+      P('cabinet', -44, -4, 1.1, 0);
+    }
   };
 
   World3D.prototype.setZoneBounds = function (bounds) {
@@ -1075,5 +1225,5 @@
     return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   }
 
-  global.World3D = World3D;
-})(window);
+  export { World3D };
+  window.World3D = World3D;

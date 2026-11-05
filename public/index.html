@@ -99,6 +99,7 @@
     <button type="button" class="tbtn" id="btn-shadows" title="Đổ bóng">💡</button>
     <button type="button" class="tbtn" id="btn-fs" title="Toàn màn hình">⛶</button>
     <button type="button" class="tbtn" id="btn-map" title="Bản đồ (M)">🗺️</button>
+    <button type="button" class="tbtn" id="btn-credits" title="Credits / giấy phép">🎨</button>
     <button type="button" class="tbtn" id="btn-help" title="Hướng dẫn">❓</button>
   </div>
 
@@ -192,6 +193,21 @@
     </div>
   </div>
 
+  
+  <div id="credits-overlay" class="overlay-panel" hidden>
+    <div class="panel-card" style="max-width:560px;max-height:80vh;overflow:auto">
+      <h2>🎨 Credits / Giấy phép tài nguyên</h2>
+      <p class="meta">3D assets (CC0 / attribution). Chi tiết đầy đủ: <code>ASSETS_LICENSES.md</code></p>
+      <div id="credits-body" style="text-align:left;font-size:13px;line-height:1.45">
+        <p><b>Characters</b> — Quaternius <i>Ultimate Modular Men</i> (CC0): Idle/Walk/Run/Wave/Interact. Retextured/tinted for prisoner orange, B&amp;W stripes, VN police olive+red.</p>
+        <p><b>Props / furniture / kitchen / garden / tools</b> — Kenney.nl CC0 (Furniture Kit, Food Kit, Nature Kit, etc.) via public mirrors.</p>
+        <p><b>Engine</b> — Three.js (MIT). Draco decoder — Google Draco (Apache-2.0).</p>
+        <p>Gameplay art fallback: procedural meshes if GLB fails to load. No Mixamo assets shipped (redistribution limits).</p>
+      </div>
+      <button id="btn-credits-ok" class="btn pri big" type="button">Đóng</button>
+    </div>
+  </div>
+
   <div id="match-overlay" class="overlay-panel" hidden>
     <div class="panel-card match-card" id="match-card"></div>
   </div>
@@ -203,12 +219,28 @@
     </div>
   </div>
 
-  <script src="/vendor/three.min.js"></script>
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "/vendor/three.module.js",
+      "three/addons/": "/vendor/jsm/"
+    }
+  }
+  </script>
   <script src="/socket.io/socket.io.js"></script>
   <script src="/sprites.js"></script>
   <script src="/audio.js"></script>
-  <script src="/world3d.js"></script>
-  <script src="/client.js"></script>
+  <script type="module">
+    import { World3D } from '/world3d.js';
+    window.World3D = World3D;
+    await new Promise((resolve, reject) => {
+      const s = document.createElement('script');
+      s.src = '/client.js';
+      s.onload = resolve;
+      s.onerror = reject;
+      document.body.appendChild(s);
+    });
+  </script>
   <script>
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {

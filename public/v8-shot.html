@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html><head>
+<meta charset="utf-8"/>
+<title>v8 shot</title>
+<script type="importmap">
+{"imports":{"three":"/vendor/three.module.js","three/addons/":"/vendor/jsm/"}}
+</script>
+<style>
+html,body{margin:0;background:#111;overflow:hidden}
+canvas{display:block;width:100vw;height:100vh}
+#hud{position:fixed;left:8px;top:8px;color:#fff;font:12px monospace;z-index:2;text-shadow:0 1px 2px #000}
+</style>
+</head><body>
+<div id="hud">loading…</div>
+<script type="module">
+import * as THREE from 'three';
+import { AssetLibrary } from '/asset-lib.js';
+
+const hud = document.getElementById('hud');
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0xb8d4f0);
+scene.fog = new THREE.Fog(0xb8d4f0, 40, 120);
+const cam = new THREE.PerspectiveCamera(55, innerWidth/innerHeight, 0.1, 200);
+const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+renderer.setSize(innerWidth, innerHeight);
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.shadowMap.enabled = true;
+document.body.appendChild(renderer.domElement);
+
+const hemi = new THREE.HemisphereLight(0xffffff, 0x445566, 0.7); scene.add(hemi);
+const sun = new THREE.DirectionalLight(0xfff2dd, 0.9); sun.position.set(20,40,10); sun.castShadow = true; scene.add(sun);
+const ground = new THREE.Mesh(new THREE.PlaneGeometry(120,120), new THREE.MeshLambertMaterial({ color: 0x6a8a5a }));
+ground.rotation.x = -Math.PI/2; ground.receiveShadow = true; scene.add(ground);
+
+const params = new URLSearchParams(location.search);
+const mode = params.get('mode') || 'chars';
+const mobile = params.get('mobile') === '1';
+if (mobile) { renderer.setSize(390, 700); cam.aspect = 390/700; cam.updateProjectionMatrix(); document.body.style.width='390px'; document.body.style.height='700px'; }
+
+const lib = new AssetLibrary();
+const t0 = performance.now();
+const ok = await lib.init();
+hud.textContent = `assets=${ok} templates=${lib.templates.size} props=${lib.propTemplates.size} loadMs=${(performance.now()-t0)|0}`;
+
+function placeChar(kind, x, z, appearance, lookAt) {
+  const g = lib.createCharacter(kind, { appearance, number: appearance.number || '042', shadows: true, stripe: appearance.stripe, tint: appearance.stripe === 'police' ? 'police' : appearance.stripe === 'blue_white' ? 'stripe' : 'orange', role: kind === 'guard' ? 'guard' : 'prisoner' });
+  if (!g) return null;
+  g.position.set(x,0,z);
+  if (lookAt) g.lookAt(lookAt.x, 0, lookAt.z);
+  scene.add(g);
+  if (g.userData.playAnim) g.userData.playAnim(params.get('anim') || 'idle');
+  return g;
+}
+
+if (mode === 'chars') {
+  cam.position.set(0, 2.2, 5.5); cam.lookAt(0, 1.1, 0);
+  placeChar('prisoner', -1.4, 0, { stripe: 'orange', number: '007' });
+  placeChar('prisoner', 0, 0, { stripe: 'blue_white', number: '128' });
+  placeChar('guard', 1.4, 0, { stripe: 'police', number: 'QG' });
+} else if (mode === 'labor') {
+  await lib.ensureZone('labor');
+  cam.position.set(-28, 8, 28); cam.lookAt(-30, 0, 14);
+  ['carrot','pumpkin','turnip','corn','dirtRow','workbench','anvil','crateLarge','barrel','bucket','cog'].forEach((k,i) => {
+    const p = lib.createProp(k, { x: -38 + (i%5)*2.2, z: 14 + Math.floor(i/5)*2.5, scale: 1.1, shadows: true });
+    if (p) scene.add(p);
+  });
+  placeChar('prisoner', -32, 16, { stripe: 'orange', number: '055' });
+} else if (mode === 'kitchen') {
+  await lib.ensureZone('kitchen');
+  cam.position.set(24, 6, 20); cam.lookAt(28, 0, 10);
+  ['fridgeLarge','stove','sink','kitchenCabinet','pan','pot'].forEach((k,i) => {
+    const p = lib.createProp(k, { x: 26 + (i%3)*2.5, z: 10 + Math.floor(i/3)*2.5, scale: 1.15, shadows: true });
+    if (p) scene.add(p);
+  });
+  placeChar('prisoner', 28, 8, { stripe: 'blue_white', number: '091' });
+} else if (mode === 'happiness') {
+  await lib.ensureZone('happiness');
+  cam.position.set(32, 5, 0); cam.lookAt(36, 0.5, -8);
+  ['sofa','sofaDesign','lamp','plant','rug','tv','tableCoffee','flower'].forEach((k,i) => {
+    const p = lib.createProp(k, { x: 34 + (i%4)*1.8, z: -12 + Math.floor(i/4)*2.2, scale: 1.1, shadows: true });
+    if (p) scene.add(p);
+  });
+  const c = placeChar('prisoner', 36, -8, { stripe: 'orange', number: '003' });
+  if (c && c.userData.playAnim) c.userData.playAnim('sit');
+} else if (mode === 'quarantine') {
+  await lib.ensureZone('quarantine');
+  cam.position.set(-40, 5, 2); cam.lookAt(-44, 0.5, -10);
+  ['bedBunk','bedSingle','desk','chairDesk','cabinet'].forEach((k,i) => {
+    const p = lib.createProp(k, { x: -48 + i*2.5, z: -10, scale: 1.1, shadows: true });
+    if (p) scene.add(p);
+  });
+  placeChar('guard', -42, -6, { stripe: 'police' });
+} else if (mode === 'yard') {
+  cam.position.set(8, 12, 22); cam.lookAt(0, 0, 0);
+  for (let i=0;i<6;i++) placeChar(i%5===0?'guard':'prisoner', -4+i*1.6, 2+ (i%2), { stripe: i%5===0?'police':(i%2?'orange':'blue_white'), number: String(100+i) });
+  await lib.ensureZone('canteen');
+  for (let i=0;i<3;i++) { const t=lib.createProp('table',{x:-2+i*3,z:-2,scale:1.2,shadows:true}); if(t)scene.add(t); }
+}
+
+let frames = 0, last = performance.now(), fps = 0;
+function tick(now) {
+  frames++;
+  if (now - last > 500) { fps = Math.round(frames * 1000 / (now - last)); frames = 0; last = now; hud.textContent = hud.textContent.replace(/ fps=\d+/,'') + ` fps=${fps}`; }
+  scene.traverse((o) => { if (o.userData && o.userData.mixer) o.userData.mixer.update(0.016); });
+  renderer.render(scene, cam);
+  requestAnimationFrame(tick);
+}
+requestAnimationFrame(tick);
+window.__shotReady = true;
+window.__capture = () => renderer.domElement.toDataURL('image/png');
+</script>
+</body></html>

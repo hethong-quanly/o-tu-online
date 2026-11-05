@@ -723,6 +723,11 @@
   // Top tools
   $('#btn-help').onclick = () => { $('#help-modal').hidden = false; };
   $('#btn-help-ok').onclick = () => { $('#help-modal').hidden = true; };
+  const creditsBtn = $('#btn-credits');
+  const creditsOk = $('#btn-credits-ok');
+  if (creditsBtn) creditsBtn.onclick = () => { const el = $('#credits-overlay'); if (el) el.hidden = false; };
+  if (creditsOk) creditsOk.onclick = () => { const el = $('#credits-overlay'); if (el) el.hidden = true; };
+
   const btnMap = $('#btn-map');
   if (btnMap) btnMap.onclick = () => toggleMap();
   const btnMapClose = $('#btn-map-close');
