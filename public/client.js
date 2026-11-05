@@ -180,7 +180,19 @@
     }
     world3d.onPos = (x, z, rotY) => socket.emit('pos', { x, z, rotY });
     world3d.onStep = () => { if (otuAudio) otuAudio.footstep(); };
+    world3d.onToggleMap = () => toggleMap();
+    let _mapTick = 0;
+    world3d.onMapTick = (snap) => {
+      _mapTick++;
+      if (_mapTick % 4 === 0) {
+        const mm = $('#minimap');
+        if (mm && !mm.hidden) drawMap(mm, snap, false);
+        if (mapOpen) drawMap($('#map-full'), snap, true);
+      }
+    };
     world3d.start();
+    const mm = $('#minimap');
+    if (mm) mm.hidden = false;
     setupJoystick();
     if (pendingMe) {
       world3d.setMe(pendingMe.id, pendingMe.appearance, pendingMe.x, pendingMe.z);
@@ -280,13 +292,108 @@
       $('#schedule-banner').hidden = false;
       let hint = '';
       if (!isGuard) {
-        if (world.schedule.id === 'an') hint = ' → vào Nhà ăn';
-        else if (world.schedule.id === 'lao_dong') hint = ' → ra Sân lao động';
+        if (world.schedule.id === 'an') hint = ' → vào Nhà ăn / Căn tin';
+        else if (world.schedule.id === 'lao_dong') hint = ' → ra Khu lao động';
         else if (world.schedule.id === 'tat_den') hint = ` → về phòng ${me.cellNo || ''}`;
       }
       $('#schedule-text').textContent = `${world.schedule.emoji || ''} ${world.schedule.name} · còn ${left}s${hint}`;
     }
+    updateIntakeUi();
+    applyZoneBounds();
     renderChatLog();
+  }
+
+  function updateIntakeUi() {
+    const ban = $('#intake-banner');
+    const line = $('#info-intake');
+    if (!me || me.role === 'guard' || me.intakeDone) {
+      if (ban) ban.hidden = true;
+      if (line) line.hidden = true;
+      return;
+    }
+    const need = me.intakeNeedMs || (config.intakeNeedMs) || 300000;
+    const cur = me.intakeChatMs || 0;
+    const pct = Math.min(100, Math.floor((cur / need) * 100));
+    const left = Math.ceil((need - cur) / 1000);
+    if (ban) {
+      ban.hidden = false;
+      $('#intake-text').textContent = `🚧 Khu tạm giam · tiếp nhận ${pct}% · còn ~${left}s nói chuyện`;
+    }
+    if (line) {
+      line.hidden = false;
+      line.textContent = `🚧 Tiếp nhận: ${pct}% (${Math.floor(cur/1000)}/${Math.floor(need/1000)}s)`;
+    }
+  }
+
+  function applyZoneBounds() {
+    if (!world3d || world3d.fallback) return;
+    if (me && !me.intakeDone && me.role !== 'guard') {
+      world3d.setZoneBounds({ minX: -52, maxX: -32, minZ: -18, maxZ: 2 });
+    } else {
+      world3d.setZoneBounds(null);
+    }
+  }
+
+  function worldToMap(x, z, w, h) {
+    // compound roughly x -55..50, z -55..48
+    const nx = (x + 55) / 105;
+    const nz = (z + 55) / 103;
+    return { x: nx * w, y: (1 - nz) * h };
+  }
+
+  function drawMap(canvas, snap, interactive) {
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    const w = canvas.width, h = canvas.height;
+    ctx.clearRect(0, 0, w, h);
+    ctx.fillStyle = '#15202e';
+    ctx.fillRect(0, 0, w, h);
+    const zones = (snap && snap.zones) || (config.zones) || (world3d && world3d.mapZones) || [];
+    zones.forEach((z) => {
+      const a = worldToMap(z.x - z.w / 2, z.z - z.d / 2, w, h);
+      const b = worldToMap(z.x + z.w / 2, z.z + z.d / 2, w, h);
+      const x = Math.min(a.x, b.x), y = Math.min(a.y, b.y);
+      const ww = Math.abs(b.x - a.x), hh = Math.abs(b.y - a.y);
+      ctx.fillStyle = (z.color || '#486') + '99';
+      ctx.fillRect(x, y, ww, hh);
+      ctx.strokeStyle = 'rgba(255,255,255,0.35)';
+      ctx.strokeRect(x, y, ww, hh);
+      ctx.fillStyle = '#fff';
+      ctx.font = interactive ? '12px Nunito,sans-serif' : '9px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(z.name || z.id, x + ww / 2, y + hh / 2 + 4);
+    });
+    if (snap && snap.players) {
+      snap.players.forEach((pl) => {
+        const p = worldToMap(pl.x, pl.z, w, h);
+        ctx.beginPath();
+        ctx.fillStyle = pl.me ? '#ffdd44' : '#7ec8ff';
+        ctx.arc(p.x, p.y, pl.me ? 5 : 3, 0, Math.PI * 2);
+        ctx.fill();
+      });
+    } else if (snap && snap.me) {
+      const p = worldToMap(snap.me.x, snap.me.z, w, h);
+      ctx.beginPath();
+      ctx.fillStyle = '#ffdd44';
+      ctx.arc(p.x, p.y, 5, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  let mapOpen = false;
+  function toggleMap(force) {
+    const ov = $('#map-overlay');
+    if (!ov) return;
+    mapOpen = force != null ? !!force : ov.hidden;
+    ov.hidden = !mapOpen;
+    if (mapOpen) {
+      const snap = world3d ? world3d.getMapSnapshot() : { zones: config.zones || [], me: me ? { x: me.x, z: me.z } : { x: 0, z: 0 }, players: [] };
+      drawMap($('#map-full'), snap, true);
+    }
+  }
+
+  function talkNow() {
+    socket.emit('talk');
   }
 
   function renderChatLog() {
@@ -616,6 +723,46 @@
   // Top tools
   $('#btn-help').onclick = () => { $('#help-modal').hidden = false; };
   $('#btn-help-ok').onclick = () => { $('#help-modal').hidden = true; };
+  const btnMap = $('#btn-map');
+  if (btnMap) btnMap.onclick = () => toggleMap();
+  const btnMapClose = $('#btn-map-close');
+  if (btnMapClose) btnMapClose.onclick = () => toggleMap(false);
+  const btnTalk = $('#btn-talk');
+  if (btnTalk) btnTalk.onclick = () => talkNow();
+  const dockTalk = $('#dock-talk');
+  if (dockTalk) dockTalk.onclick = () => talkNow();
+  const dockMap = $('#dock-map');
+  if (dockMap) dockMap.onclick = () => toggleMap();
+  const mapFull = $('#map-full');
+  if (mapFull) {
+    mapFull.onclick = (ev) => {
+      if (!me || (!me.intakeDone && me.role !== 'guard')) {
+        toast('Hoàn thành tiếp nhận ở Khu tạm giam trước.');
+        return;
+      }
+      const rect = mapFull.getBoundingClientRect();
+      const mx = (ev.clientX - rect.left) / rect.width * mapFull.width;
+      const my = (ev.clientY - rect.top) / rect.height * mapFull.height;
+      // inverse worldToMap
+      const x = mx / mapFull.width * 105 - 55;
+      const z = (1 - my / mapFull.height) * 103 - 55;
+      // pick nearest room
+      let best = null, bestD = Infinity;
+      (config.rooms || []).forEach((r) => {
+        const d = (r.x - x) ** 2 + (r.z - z) ** 2;
+        if (d < bestD) { bestD = d; best = r; }
+      });
+      if (best) {
+        if (best.id === 'phong_hanh_phuc' && !me.happinessUnlocked) {
+          toast('Phòng hạnh phúc khóa — hoàn thành 100% nhiệm vụ.');
+          return;
+        }
+        socket.emit('moveTo', best.id);
+        toast('Đang tới ' + best.name);
+        toggleMap(false);
+      }
+    };
+  }
   $('#btn-fs').onclick = () => {
     if (!document.fullscreenElement) document.documentElement.requestFullscreen?.();
     else document.exitFullscreen?.();
@@ -777,8 +924,13 @@
     if (!world3d) {
       pendingMe = p;
     } else if (!world3d.fallback) {
+      applyZoneBounds();
       if (!world3d.myId || world3d.myId !== p.id) {
         world3d.setMe(p.id, p.appearance, p.x, p.z);
+      }
+      // snap local if server teleported (intake done)
+      if (typeof p.x === 'number' && Math.hypot((world3d.localPos.x||0)-p.x, (world3d.localPos.z||0)-p.z) > 8) {
+        world3d.localPos.x = p.x; world3d.localPos.z = p.z;
       }
       const mesh = world3d.players.get(p.id);
       if (mesh) {
@@ -822,6 +974,12 @@
     }
   });
   socket.on('schedule', (sch) => { world.schedule = sch; updateHud(); });
+  socket.on('intakeDone', (r) => {
+    toast((r && r.message) || 'Chuyển sang Khu phân trại!');
+    if (me) { me.intakeDone = true; me.zone = 'general'; }
+    applyZoneBounds();
+    updateIntakeUi();
+  });
   socket.on('letters', (list) => { world.letters = list; if (sideMode === 'letters') openSide('letters'); });
   socket.on('errorMsg', (msg) => {
     if (!$('#join-screen').hidden) $('#join-error').textContent = msg;

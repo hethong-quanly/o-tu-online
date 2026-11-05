@@ -33,7 +33,7 @@
     <div class="panel-card join-card login-card">
       <div class="lotus-ish" aria-hidden="true">⛓️</div>
       <h1 id="join-h">Ở tù online</h1>
-      <p class="sub">Trại chibi 3D · Nhiệm vụ · Mini-game · Quản giáo</p>
+      <p class="sub">Trại 3D v7 · Bản đồ · Khu tạm giam · Lao động · Phòng hạnh phúc</p>
       <label class="lbl" for="fullName">Họ và tên</label>
       <input id="fullName" maxlength="40" autocomplete="name" placeholder="VD: Nguyễn Văn Sọc" />
       <label class="lbl" for="nick">Biệt danh trong trại</label>
@@ -88,6 +88,7 @@
     <div class="info-line" id="info-rank">🐣 Hạng: Tù mới · 0 XP</div>
     <div class="info-line" id="info-cell">🚪 Phòng giam: —</div>
     <div class="info-line" id="info-guard" hidden>👮 Quản giáo: —</div>
+    <div class="info-line accent" id="info-intake" hidden>🚧 Tiếp nhận: —</div>
   </aside>
 
   <!-- Top-right tools -->
@@ -97,11 +98,25 @@
     <button type="button" class="tbtn" id="btn-night" title="Đêm/ngày">🌙</button>
     <button type="button" class="tbtn" id="btn-shadows" title="Đổ bóng">💡</button>
     <button type="button" class="tbtn" id="btn-fs" title="Toàn màn hình">⛶</button>
+    <button type="button" class="tbtn" id="btn-map" title="Bản đồ (M)">🗺️</button>
     <button type="button" class="tbtn" id="btn-help" title="Hướng dẫn">❓</button>
   </div>
 
   <div class="welcome-banner" id="welcome-banner" hidden></div>
   <div class="schedule-banner" id="schedule-banner" hidden><span id="schedule-text">—</span></div>
+  <div class="intake-banner" id="intake-banner" hidden>
+    <span id="intake-text">🚧 Khu tạm giam — nói chuyện 5 phút để chuyển khu</span>
+    <button type="button" class="btn sm pri" id="btn-talk">💬 Nói chuyện</button>
+  </div>
+  <canvas id="minimap" width="160" height="120" aria-label="Minimap" hidden></canvas>
+  <div id="map-overlay" class="overlay-panel" hidden>
+    <div class="panel-card map-card">
+      <h2>Bản đồ trại</h2>
+      <canvas id="map-full" width="520" height="400"></canvas>
+      <p class="meta" id="map-legend">Chạm khu để dịch chuyển nhanh (nếu được phép)</p>
+      <button type="button" class="btn pri" id="btn-map-close">Đóng (M)</button>
+    </div>
+  </div>
 
   <!-- Chat panel (collapsible) -->
   <section class="chat-panel" id="chat-panel" hidden>
@@ -123,6 +138,8 @@
   <nav class="dock" id="dock" hidden aria-label="Hành động">
     <button type="button" data-act="sit"><span>🪑</span><small>Ngồi</small></button>
     <button type="button" data-act="wave"><span>👋</span><small>Vẫy tay</small></button>
+    <button type="button" id="dock-talk"><span>💬</span><small>Nói chuyện</small></button>
+    <button type="button" id="dock-map"><span>🗺️</span><small>Bản đồ</small></button>
     <button type="button" data-act="pushup"><span>🏋️</span><small>Hít đất</small></button>
     <button type="button" data-act="letter"><span>✉️</span><small>Viết thư</small></button>
     <button type="button" data-act="mark_day"><span>✏️</span><small>Gạch</small></button>
@@ -156,7 +173,11 @@
     <div class="panel-card help-card">
       <h2>Hướng dẫn</h2>
       <ul class="help-list">
-        <li><b>Di chuyển:</b> WASD / phím mũi tên, chạm sàn, hoặc joystick trên điện thoại.</li>
+        <li><b>Bản đồ:</b> phím <b>M</b> / nút 🗺️ — minimap góc phải, bản đồ đầy đủ có nhãn khu.</li>
+        <li><b>Khu tạm giam:</b> tù mới không ra ngoài; nói chuyện / chat tích lũy 5 phút với cán bộ rồi vào Khu phân trại.</li>
+        <li><b>Lao động:</b> thu hoạch rau, may quần áo, đóng tủ/bàn/ghế tại khu lao động (đúng giờ lao động).</li>
+        <li><b>Phòng hạnh phúc:</b> mở khi hoàn thành 100% nhiệm vụ — gặp mặt gia đình (lành mạnh), nhận buff.</li>
+        <li><b>Di chuyển:</b> WASD / phím mũi tên, chạm sàn, hoặc joystick trên điện thoại. Shift = chạy.</li>
         <li><b>Camera:</b> Kéo chuột / chạm-kéo để xoay · lăn chuột để zoom.</li>
         <li><b>Sinh hoạt:</b> Ngồi (căn tin), hít đất, vẫy tay, gạch ngày, viết thư, về phòng ngủ.</li>
         <li><b>Trò chơi:</b> Caro, Kéo Búa Bao, Đố vui, Ném bóng, Ô ăn quan, Tiến lên lite vs NPC hoặc người chơi.</li>

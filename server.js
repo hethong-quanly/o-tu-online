@@ -5,7 +5,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const { createClient } = require('@supabase/supabase-js');
-const v6 = require('./lib/v6');
+const v6 = require('./lib/v7');
 
 const PORT = process.env.PORT || 3847;
 const DATA_FILE = path.join(__dirname, 'data', 'players.json');
@@ -19,7 +19,7 @@ const supabase = useSupabase
   : null;
 const MAX_PLAYERS = Math.max(1, parseInt(process.env.MAX_PLAYERS || '10000', 10) || 10000);
 const NPC_COUNT = Math.max(0, parseInt(process.env.NPC_COUNT || '16', 10) || 16);
-const VERSION = '3d-v6';
+const VERSION = '3d-v7';
 
 /** Guard NPCs — patrol, vision, bribe window (in-game money only) */
 const GUARD_DEFS = [
@@ -182,9 +182,12 @@ app.use(express.static(path.join(__dirname, 'public'), {
 }));
 
 const JOBS = {
-  giat_do: { id: 'giat_do', name: 'Giặt đồ', emoji: '👕', basePay: 15, energyCost: 8, cooldownMs: 8000, description: 'Giặt quần áo cho trại' },
-  nau_an: { id: 'nau_an', name: 'Nấu ăn', emoji: '🍲', basePay: 25, energyCost: 12, cooldownMs: 12000, description: 'Giúp bếp nấu suất ăn' },
-  lao_dong: { id: 'lao_dong', name: 'Lao động nặng', emoji: '⛏️', basePay: 45, energyCost: 20, cooldownMs: 18000, description: 'Đập đá / dọn sân' },
+  giat_do: { id: 'giat_do', name: 'Giặt đồ', emoji: '👕', basePay: 15, energyCost: 8, cooldownMs: 8000, description: 'Giặt quần áo cho trại', room: null },
+  nau_an: { id: 'nau_an', name: 'Nấu ăn', emoji: '🍲', basePay: 25, energyCost: 12, cooldownMs: 12000, description: 'Giúp bếp nấu suất ăn', room: 'nha_bep' },
+  lao_dong: { id: 'lao_dong', name: 'Lao động nặng', emoji: '⛏️', basePay: 45, energyCost: 20, cooldownMs: 18000, description: 'Đập đá / dọn sân', room: 'xuong' },
+  thu_hoach: v6.LABOR_JOBS.thu_hoach,
+  may_do: v6.LABOR_JOBS.may_do,
+  moc: v6.LABOR_JOBS.moc,
 };
 
 const SHOP = {
@@ -259,7 +262,7 @@ const SENTENCE_OPTIONS = [
 ];
 
 const SCHEDULE = [
-  { id: 'an', name: 'Giờ ăn', emoji: '🍲', roomHint: 'nha_bep', seconds: 55, graceSec: 12, announce: '📢 Quản giáo: Giờ ăn! Vào Nhà ăn / Bếp. Vắng mặt sẽ bị trừ điểm.' },
+  { id: 'an', name: 'Giờ ăn', emoji: '🍲', roomHint: 'nha_bep', seconds: 55, graceSec: 12, announce: '📢 Quản giáo: Giờ ăn! Vào Nhà ăn / Căn tin / Bếp. Vắng mặt sẽ bị trừ điểm.' },
   { id: 'lao_dong', name: 'Giờ lao động', emoji: '⛏️', roomHint: 'xuong', seconds: 55, graceSec: 12, announce: '📢 Quản giáo: Giờ lao động! Ra Sân lao động / Xưởng ngay.' },
   { id: 'tat_den', name: 'Giờ ngủ / Tắt đèn', emoji: '🌙', roomHint: 'cell', seconds: 55, graceSec: 15, announce: '📢 Quản giáo: Tắt đèn! Về đúng phòng giam của mình nghỉ.' },
 ];
@@ -396,9 +399,13 @@ function defaultPlayer(payload, socketId) {
     role: 'prisoner',
     cellId: cell.id,
     cellNo: cell.cellNo,
-    room: cell.id,
-    x: cell.x + (Math.random() - 0.5) * 3,
-    z: cell.z + (Math.random() - 0.5) * 3,
+    room: 'khu_tam_giam',
+    zone: 'quarantine',
+    intakeChatMs: 0,
+    intakeDone: false,
+    happinessUnlocked: false,
+    x: -42 + (Math.random() - 0.5) * 6,
+    z: -8 + (Math.random() - 0.5) * 6,
     rotY: 0,
     upgrades: { giuong: 0, cong_cu: 0, dung_cu_vuot: 0 },
     cooldowns: {},
@@ -432,6 +439,11 @@ function defaultPlayer(payload, socketId) {
     guardRefuseBribes: 0,
     guardQuestClaimed: {},
     pendingBribes: [],
+    zone: 'quarantine',
+    intakeChatMs: 0,
+    intakeDone: false,
+    happinessUnlocked: false,
+    lastTalkAt: 0,
   };
 }
 
@@ -692,6 +704,12 @@ function publicPlayer(p) {
     appearance: p.appearance || normalizeAppearance(null),
     emote: p.emote && Date.now() < p.emoteUntil ? p.emote : null,
     sleeping: !!p.sleeping,
+    zone: p.zone || (p.intakeDone ? 'general' : 'quarantine'),
+    intakeDone: !!p.intakeDone,
+    intakeChatMs: p.intakeChatMs || 0,
+    intakeNeedMs: v6.INTAKE_NEED_MS,
+    questsPct: v6.questsCompletePct(p),
+    happinessUnlocked: v6.happinessUnlocked(p),
   };
 }
 
@@ -1174,7 +1192,8 @@ io.on('connection', (socket) => {
     jobs: JOBS, shop: SHOP, rooms: ROOMS, appearance: APPEARANCE, roomGraph: ROOM_GRAPH,
     crimes: CRIMES, sentences: SENTENCE_OPTIONS, achievements: ACHIEVEMENTS, ranks: RANKS,
     guardRanks: v6.GUARD_RANKS, dailyQuests: v6.DAILY_QUESTS, rankQuests: v6.RANK_QUESTS, guardQuests: v6.GUARD_QUESTS,
-    cellCapacity: v6.CELL_CAPACITY, cellCount: CELL_COUNT,
+    cellCapacity: v6.CELL_CAPACITY, cellCount: CELL_COUNT, zones: v6.ZONES,
+    intakeNeedMs: v6.INTAKE_NEED_MS,
     schedule: currentSchedule(), dayTickMs: DAY_TICK_MS, reviewEveryDays: REVIEW_EVERY_DAYS,
     maxPlayers: MAX_PLAYERS, npcCount: NPC_COUNT, version: VERSION,
   });
@@ -1282,6 +1301,24 @@ io.on('connection', (socket) => {
     v6.ensureDaily(p);
     if (!p.rankQuestClaimed) p.rankQuestClaimed = {};
     if (!p.guardQuestClaimed) p.guardQuestClaimed = {};
+    if (p.role === 'guard') {
+      p.intakeDone = true; p.zone = 'general';
+    } else {
+      if (p.intakeDone == null && ((p.daysServed || 0) > 0 || (p.workCount || 0) > 0 || (p.rankXp || 0) > 0 || (p.rehabPoints || 0) > 5)) {
+        p.intakeDone = true;
+        p.zone = 'general';
+      }
+      v6.ensureIntake(p);
+      if (!p.intakeDone) {
+        p.room = 'khu_tam_giam';
+        p.zone = 'quarantine';
+        const qr = ROOM_BY_ID.khu_tam_giam;
+        if (qr) { p.x = qr.x + (Math.random() - 0.5) * 4; p.z = qr.z + (Math.random() - 0.5) * 4; }
+      } else if (p.zone === 'quarantine') {
+        p.zone = 'general';
+      }
+      p.happinessUnlocked = v6.happinessUnlocked(p);
+    }
 
     // unlock good_behavior baseline check later; grant clean if no fails
     unlockAchievements(p, socket);
@@ -1301,12 +1338,26 @@ io.on('connection', (socket) => {
     if (p.role !== 'guard' && (p.escaped || p.released)) return;
     if (!ROOM_BY_ID[roomId]) return;
     if (p.sleeping) p.sleeping = false;
+    if (p.role !== 'guard' && !p.intakeDone && roomId !== 'khu_tam_giam') {
+      socket.emit('errorMsg', '🚧 Bạn đang ở Khu tạm giam. Nói chuyện đủ 5 phút với cán bộ/người chơi để được chuyển khu.');
+      return;
+    }
+    if (roomId === 'phong_hanh_phuc' && p.role !== 'guard' && !v6.happinessUnlocked(p)) {
+      socket.emit('errorMsg', '🏠 Phòng hạnh phúc chỉ mở khi hoàn thành 100% nhiệm vụ.');
+      return;
+    }
     if (p.energy < 2) { socket.emit('errorMsg', 'Không đủ năng lượng để di chuyển!'); return; }
     p.energy -= 2;
     p.room = roomId;
     const r = ROOM_BY_ID[roomId];
     p.x = r.x + (Math.random() - 0.5) * 2;
     p.z = r.z + (Math.random() - 0.5) * 2;
+    if (roomId === 'phong_hanh_phuc' && v6.happinessUnlocked(p)) {
+      p.health = Math.min(p.maxHealth, p.health + 20);
+      p.energy = Math.min(p.maxEnergy, p.energy + 25);
+      p.rehabPoints = (p.rehabPoints || 0) + 5;
+      socket.emit('actionResult', { kind: 'happiness', message: '🏠 Gia đình gặp mặt ấm áp! +HP +năng lượng +điểm cải tạo.' });
+    }
     emitSelf(socket, p);
     broadcastState();
   }
@@ -1318,18 +1369,25 @@ io.on('connection', (socket) => {
     if (!p) return;
     if (p.role !== 'guard' && (p.escaped || p.released)) return;
     if (!payload || typeof payload.x !== 'number' || typeof payload.z !== 'number') return;
-    const x = Math.max(-40, Math.min(40, payload.x));
-    const z = Math.max(-40, Math.min(45, payload.z));
+    let x = payload.x, z = payload.z;
+    const clamped = v6.clampPosForZone(p, x, z);
+    x = clamped.x; z = clamped.z;
     // soft speed clamp vs last
     const dx = x - (p.x || 0);
     const dz = z - (p.z || 0);
-    if (dx * dx + dz * dz > 40) return; // ignore teleport jumps
+    if (dx * dx + dz * dz > 55) return; // ignore teleport jumps
     p.x = x;
     p.z = z;
     if (typeof payload.rotY === 'number') p.rotY = payload.rotY;
     if (p.sleeping) p.sleeping = false;
-    const nr = nearestRoom(x, z);
-    if (nr !== p.room) p.room = nr;
+    if (!p.intakeDone && p.role !== 'guard') {
+      p.room = 'khu_tam_giam';
+    } else {
+      const nr = nearestRoom(x, z);
+      if (nr === 'phong_hanh_phuc' && !v6.happinessUnlocked(p) && p.role !== 'guard') {
+        /* stay previous */
+      } else if (nr !== p.room) p.room = nr;
+    }
     // lightweight broadcast throttle via next regen — also emit sparse
   });
 
@@ -1360,6 +1418,7 @@ io.on('connection', (socket) => {
       unlockAchievements(p, socket);
       socket.emit('actionResult', { kind, message: `Gạch thêm 1 ngày. Tổng: ${p.daysMarked}.` });
     } else if (kind === 'sleep') {
+      if (!p.intakeDone) { socket.emit('errorMsg', 'Hoàn thành tiếp nhận trước khi về phòng giam.'); return; }
       const cell = ROOM_BY_ID[p.cellId] || ROOM_BY_ID[p.room] || v6.pickCell(online, ROOMS);
       p.cellId = cell.id; p.cellNo = cell.cellNo;
       p.room = cell.id;
@@ -1398,12 +1457,21 @@ io.on('connection', (socket) => {
   socket.on('work', (jobId) => {
     const p = online.get(socket.id);
     if (!p || p.escaped || p.released) return;
+    if (!p.intakeDone && p.role !== 'guard') {
+      socket.emit('errorMsg', 'Hoàn thành nhiệm vụ tiếp nhận ở Khu tạm giam trước đã.');
+      return;
+    }
     const job = JOBS[jobId];
     if (!job) return;
+    if (job.room && p.room !== job.room && !(jobId === 'lao_dong' && ['xuong','vuon_rau','xuong_may','xuong_moc'].includes(p.room))) {
+      socket.emit('errorMsg', `Phải ở ${ROOM_BY_ID[job.room]?.name || job.room} để làm ${job.name}.`);
+      return;
+    }
     const now = Date.now();
     if (p.cooldowns[jobId] && p.cooldowns[jobId] > now) { socket.emit('errorMsg', `Chưa hết chờ ${job.name}.`); return; }
     if (p.energy < job.energyCost) { socket.emit('errorMsg', 'Không đủ năng lượng!'); return; }
     p.sleeping = false;
+    setEmote(p, job.anim || 'work', 5000);
     const toolBonus = 1 + (p.upgrades.cong_cu || 0) * 0.15;
     const rankBonus = 1 + (rankFromXp(p.rankXp || 0).payBonus || 0);
     const pay = Math.floor(job.basePay * toolBonus * rankBonus * (0.9 + Math.random() * 0.2));
@@ -1527,6 +1595,52 @@ io.on('connection', (socket) => {
     const msg = String(text || '').trim().slice(0, 200).replace(/[<>]/g, '');
     if (!msg) return;
     pushChat({ type: 'user', nick: p.nickname, text: msg, ts: Date.now() });
+    if (!p.intakeDone && p.role !== 'guard') {
+      const done = v6.creditIntake(p, v6.CHAT_CREDIT_MS, socket, pushChat);
+      emitSelf(socket, p);
+      if (done) {
+        const cell = ROOM_BY_ID[p.cellId];
+        if (cell) { p.x = cell.x; p.z = cell.z; p.room = cell.id; }
+        saveData();
+        broadcastState();
+      }
+    }
+  });
+
+  socket.on('talk', () => {
+    const p = online.get(socket.id);
+    if (!p || p.escaped || (p.released && p.role !== 'guard')) return;
+    const now = Date.now();
+    if ((p.lastTalkAt || 0) + 1000 > now) return; // ~1s / tick → 5 phút wall-clock nếu chỉ bấm Nói chuyện
+    p.lastTalkAt = now;
+    if (!p.intakeDone && p.role !== 'guard') {
+      // Must be in quarantine near cán bộ (room khu_tam_giam)
+      if (p.room !== 'khu_tam_giam') {
+        socket.emit('errorMsg', 'Hãy ở Khu tạm giam và nói chuyện với cán bộ tiếp nhận.');
+        return;
+      }
+      setEmote(p, 'wave', 2000);
+      const done = v6.creditIntake(p, v6.TALK_TICK_MS, socket, pushChat); // +1s mỗi lần nói
+      const left = Math.max(0, v6.INTAKE_NEED_MS - (p.intakeChatMs || 0));
+      socket.emit('actionResult', {
+        kind: 'talk',
+        message: done
+          ? 'Hoàn thành tiếp nhận!'
+          : `Nói chuyện với cán bộ… còn ~${Math.ceil(left / 1000)}s (${Math.floor(((p.intakeChatMs || 0) / v6.INTAKE_NEED_MS) * 100)}%)`,
+      });
+      if (done) {
+        const cell = ROOM_BY_ID[p.cellId];
+        if (cell) { p.x = cell.x; p.z = cell.z; p.room = cell.id; }
+        saveData();
+      }
+      emitSelf(socket, p);
+      broadcastState();
+    } else {
+      setEmote(p, 'wave', 2000);
+      socket.emit('actionResult', { kind: 'talk', message: 'Bạn trò chuyện với mọi người xung quanh.' });
+      emitSelf(socket, p);
+      broadcastState();
+    }
   });
 
   socket.on('startGame', (payload) => {
@@ -1746,6 +1860,10 @@ io.on('connection', (socket) => {
       p.money += q.money; p.totalEarned += q.money;
       grantGuardXp(p, q.xp, socket);
       socket.emit('actionResult', { kind: 'quest', message: `👮 ${q.name}: +${q.xp} XP QG, +${q.money}$` });
+    }
+    p.happinessUnlocked = v6.happinessUnlocked(p);
+    if (p.happinessUnlocked) {
+      socket.emit('actionResult', { kind: 'happinessUnlock', message: '🏠 Phòng hạnh phúc đã mở! Tìm trên bản đồ (M).' });
     }
     emitSelf(socket, p); broadcastState(); saveData();
   });
