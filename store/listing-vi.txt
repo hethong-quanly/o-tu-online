@@ -1,0 +1,19 @@
+TITLE:
+Ở tù online
+
+SHORT_DESCRIPTION:
+Mô phỏng trại giam chibi 3D: cải tạo, mini-game, vượt ngục thành Quản giáo.
+
+FULL_DESCRIPTION:
+Ở tù online là game multiplayer vui nhộn mô phỏng đời sống trong trại giam kiểu chibi 3D.
+
+• Nhiều phòng giam tự mở rộng, mỗi phòng tối đa 10 người, hiện số phòng
+• Lịch sinh hoạt bắt buộc: ngủ về phòng, lao động ra xưởng, ăn vào nhà ăn — vắng mặt bị trừ điểm
+• Nhiệm vụ ngày & nhiệm vụ lên cấp: nhận XP và tiền
+• Mini-game: Cờ Caro, Kéo Búa Bao, Đố vui, Ném bóng rổ, Ô ăn quan, Tiến lên lite (vs NPC hoặc người chơi)
+• Vượt ngục thành công → trở thành Quản giáo (đồng phục, HUD mới); thất bại → mất điểm, án tính lại từ đầu
+• Sự nghiệp Quản giáo: Hạ sĩ → … → Giám thị; tuần tra, điểm danh, bắt vượt ngục, nhận/từ chối hối lộ
+
+Cần kết nối Internet. Dữ liệu tiến trình lưu trên máy chủ game.
+
+Chính sách quyền riêng tư: https://o-tu-online.onrender.com/privacy

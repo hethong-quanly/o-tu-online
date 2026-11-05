@@ -19,3 +19,14 @@ cloudflared
 
 .render-env
 .env.local
+
+# Upload signing keys — NEVER commit
+android-keys/
+*.jks
+*.keystore
+
+# Capacitor/Android local
+android/local.properties
+android/.gradle/
+android/app/build/
+android-webview/local.properties

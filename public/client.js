@@ -251,14 +251,40 @@
     $('#info-sentence').textContent = `⚖️ Còn ${me.sentenceLeftDays} ngày · 🏅 ${me.rehabRatingLabel || 'Kém'} (${me.rehabPoints || 0}đ)`;
     const rk = me.rank || {};
     const rankEl = $('#info-rank');
+    const isGuard = me.role === 'guard';
     if (rankEl) {
-      const next = rk.nextXp != null ? ` · tới ${rk.nextName || '?'} ${rk.nextXp}XP` : ' · MAX';
-      rankEl.textContent = `${rk.emoji || '🐣'} Hạng: ${rk.name || 'Tù mới'} · ${rk.xp || me.rankXp || 0} XP${next}`;
+      if (isGuard) {
+        const g = me.guardRank || {};
+        const next = g.nextXp != null ? ` · tới ${g.nextName || '?'} ${g.nextXp}XP` : ' · MAX';
+        rankEl.textContent = `${g.emoji || '👮'} QG: ${g.name || 'Hạ sĩ'} · ${g.xp || 0} XP${next}`;
+      } else {
+        const next = rk.nextXp != null ? ` · tới ${rk.nextName || '?'} ${rk.nextXp}XP` : ' · MAX';
+        rankEl.textContent = `${rk.emoji || '🐣'} Hạng: ${rk.name || 'Tù mới'} · ${rk.xp || me.rankXp || 0} XP${next}`;
+      }
+    }
+    const cellEl = $('#info-cell');
+    if (cellEl) {
+      if (isGuard) cellEl.textContent = '👮 Vai trò: Quản giáo (tuần tra / bắt vượt ngục)';
+      else cellEl.textContent = `🚪 Phòng giam số ${me.cellNo || '—'} (${me.cellId || me.room || '—'})`;
+    }
+    const gEl = $('#info-guard');
+    if (gEl) {
+      gEl.hidden = !isGuard;
+      if (isGuard) {
+        const g = me.guardRank || {};
+        gEl.textContent = `✨ Liêm chính: ${g.integrity || me.guardIntegrity || 0} · Bắt: ${me.guardCatches || 0}`;
+      }
     }
     if (world.schedule) {
       const left = Math.max(0, Math.ceil((world.schedule.endsAt - Date.now()) / 1000));
       $('#schedule-banner').hidden = false;
-      $('#schedule-text').textContent = `${world.schedule.emoji || ''} ${world.schedule.name} · còn ${left}s`;
+      let hint = '';
+      if (!isGuard) {
+        if (world.schedule.id === 'an') hint = ' → vào Nhà ăn';
+        else if (world.schedule.id === 'lao_dong') hint = ' → ra Sân lao động';
+        else if (world.schedule.id === 'tat_den') hint = ` → về phòng ${me.cellNo || ''}`;
+      }
+      $('#schedule-text').textContent = `${world.schedule.emoji || ''} ${world.schedule.name} · còn ${left}s${hint}`;
     }
     renderChatLog();
   }
@@ -282,7 +308,9 @@
     const titles = {
       jobs: ['Làm việc', 'Kiếm tiền & điểm cải tạo'],
       shop: ['Cửa hàng trại', 'Nâng cấp sinh hoạt'],
-      games: ['Trò chơi', 'Caro & Kéo Búa Bao'],
+      games: ['Trò chơi', 'Caro · Đố vui · Bóng · Ô ăn quan · Tiến lên'],
+      quests: ['Nhiệm vụ lên cấp', 'Daily + hạng + quản giáo'],
+      guard: ['Nghiệp vụ Quản giáo', 'Tuần tra · Điểm danh · Bắt vượt'],
       board: ['Bảng xếp hạng', 'Thắng / Cải tạo / Ra tù sớm'],
       achievements: ['Vinh danh · Thành tích', 'Tiến độ & điểm cải tạo'],
       letter: ['Viết thư về nhà', 'Ghim lên Bảng Thư'],
@@ -300,6 +328,8 @@
     if (mode === 'jobs') body.innerHTML = renderJobs();
     else if (mode === 'shop') body.innerHTML = renderShop();
     else if (mode === 'games') body.innerHTML = renderGames();
+    else if (mode === 'quests') body.innerHTML = renderQuests();
+    else if (mode === 'guard') body.innerHTML = renderGuardPanel();
     else if (mode === 'board') body.innerHTML = renderBoard();
     else if (mode === 'achievements') body.innerHTML = renderAchievements();
     else if (mode === 'letter') body.innerHTML = renderLetterForm();
@@ -320,7 +350,8 @@
         <button class="btn pri" id="btn-bribe" type="button">💸 Hối lộ cán bộ gần nhất</button>
       </div>
       <button class="btn big" id="btn-escape" type="button" style="margin-top:10px">🏃 Vượt ngục</button>
-      <p class="ghi">Cần hối lộ trước. Không hối lộ → gần như chắc bị bắt. Thất bại = +15 ngày án.</p>`;
+      <p class="ghi">Hối lộ trước. Thành công → trở thành Quản giáo. Thất bại → mất hết điểm &amp; án tính lại từ đầu.</p>
+      <div style="margin-top:10px" id="player-guards-bribe"></div>`;
     else body.innerHTML = '';
     bindSide(body);
     const esc = $('#btn-escape');
@@ -331,6 +362,17 @@
       if (otuAudio) otuAudio.coin();
       socket.emit('bribeGuard', null);
     };
+    const pg = $('#player-guards-bribe');
+    if (pg && me && me.role !== 'guard') {
+      const guards = (world.players || []).filter((p) => p.role === 'guard');
+      if (guards.length) {
+        pg.innerHTML = '<b>Hối lộ Quản giáo người chơi:</b>' + guards.map((g) =>
+          `<button class="btn sm" style="margin:4px" data-bribe-player="${g.id}">💸 ${escapeHtml(g.nickname)}</button>`).join('');
+        pg.querySelectorAll('[data-bribe-player]').forEach((b) => {
+          b.onclick = () => socket.emit('guardBribeOffer', { guardId: b.dataset.bribePlayer });
+        });
+      }
+    }
   }
 
   function tryEscape() {
@@ -344,7 +386,7 @@
       toast('Chưa hối lộ cán bộ — vượt gần như không thể. Bấm Hối lộ trước!');
       return;
     }
-    if (!confirm('Vượt ngục lúc cán bộ đang “quay đi”? Thất bại = +15 ngày án.')) return;
+    if (!confirm('Vượt ngục? Thành công → Quản giáo. Thất bại → mất hết điểm, án tính lại từ đầu.')) return;
     unlockAudio();
     socket.emit('escape');
   }
@@ -356,6 +398,14 @@
     body.querySelectorAll('[data-start]').forEach((b) => b.onclick = () => socket.emit('startGame', { game: b.dataset.start, vs: b.dataset.vs }));
     body.querySelectorAll('[data-invite]').forEach((b) => b.onclick = () => socket.emit('startGame', { game: b.dataset.invite, vs: 'invite', targetId: b.dataset.id }));
     body.querySelectorAll('[data-room]').forEach((b) => b.onclick = () => { socket.emit('moveTo', b.dataset.room); toast('Đang tới ' + roomName(b.dataset.room)); });
+    body.querySelectorAll('[data-claim]').forEach((b) => b.onclick = () => socket.emit('claimQuest', { kind: b.dataset.claim, id: b.dataset.qid }));
+    body.querySelectorAll('[data-gact]').forEach((b) => b.onclick = () => {
+      const act = b.dataset.gact;
+      if (act === 'patrol') socket.emit('guardPatrol');
+      else if (act === 'roll') socket.emit('guardRollCall');
+      else if (act === 'catch') socket.emit('guardCatch', {});
+    });
+    body.querySelectorAll('[data-bribe-resp]').forEach((b) => b.onclick = () => socket.emit('guardRespondBribe', { fromId: b.dataset.from, accept: b.dataset.bribeResp === '1' }));
     const lf = $('#letter-form');
     if (lf) lf.onsubmit = (e) => {
       e.preventDefault();
@@ -381,14 +431,71 @@
   }
   function renderGames() {
     const others = (world.players || []).filter((p) => me && p.id !== me.id);
-    return `<div style="display:flex;flex-direction:column;gap:8px">
-      <button class="btn pri" data-start="caro" data-vs="npc">⬛ Cờ Caro vs Quản giáo</button>
-      <button class="btn pri" data-start="rps" data-vs="npc">✊ Kéo Búa Bao vs Quản giáo</button>
-      <div class="meta">Mời người chơi (tên xanh):</div>
-      ${others.length ? others.map((p) => `
-        <button class="btn" data-invite="caro" data-id="${p.id}">Caro → ${escapeHtml(p.nickname)}</button>
-        <button class="btn" data-invite="rps" data-id="${p.id}">KBB → ${escapeHtml(p.nickname)}</button>`).join('') : '<span class="meta">Chưa có ai khác online.</span>'}
-    </div>`;
+    const npcBtns = [
+      ['caro', '⬛ Cờ Caro'],
+      ['rps', '✊ Kéo Búa Bao'],
+      ['quiz', '🧠 Đố vui'],
+      ['ball', '🏀 Ném bóng rổ'],
+      ['oanquan', '🟡 Ô ăn quan'],
+      ['tienlen', '🃏 Tiến lên lite'],
+    ].map(([id, label]) => `<button class="btn pri" data-start="${id}" data-vs="npc">${label} vs NPC</button>`).join('');
+    const inv = others.length ? others.map((p) => `
+        <div class="meta">${escapeHtml(p.nickname)}${p.role === 'guard' ? ' 👮' : ''} · phòng ${p.cellNo || '—'}</div>
+        <div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:8px">
+          <button class="btn sm" data-invite="caro" data-id="${p.id}">Caro</button>
+          <button class="btn sm" data-invite="rps" data-id="${p.id}">KBB</button>
+          <button class="btn sm" data-invite="quiz" data-id="${p.id}">Đố vui</button>
+          <button class="btn sm" data-invite="ball" data-id="${p.id}">Bóng</button>
+          <button class="btn sm" data-invite="oanquan" data-id="${p.id}">Ô ăn quan</button>
+          <button class="btn sm" data-invite="tienlen" data-id="${p.id}">Tiến lên</button>
+        </div>`).join('') : '<span class="meta">Chưa có ai khác online.</span>';
+    return `<div style="display:flex;flex-direction:column;gap:8px">${npcBtns}<div class="meta">Mời người chơi:</div>${inv}</div>`;
+  }
+  function questBlock(title, list, kind) {
+    if (!list || !list.length) return '';
+    return `<h3 style="margin:10px 0 6px;font-size:14px;color:var(--accent)">${title}</h3>` + list.map((q) => {
+      const cur = q.current || 0;
+      const tgt = q.target || q.needXp || 1;
+      const pct = Math.min(100, Math.round((cur / tgt) * 100));
+      const can = q.done && !q.claimed;
+      return `<div style="margin:8px 0;padding:8px;border:1px solid var(--line);border-radius:10px">
+        <div style="display:flex;justify-content:space-between;font-size:13px"><span>${q.claimed ? '✅' : (q.done ? '🎁' : '⬜')} <b>${escapeHtml(q.name)}</b></span><span>${cur}/${tgt}</span></div>
+        <div class="meta">${escapeHtml(q.desc || '')} · +${q.xp || 0}XP +${q.money || 0}₫</div>
+        <div class="progress"><i style="width:${pct}%"></i></div>
+        ${can ? `<button class="btn pri sm" style="margin-top:6px" data-claim="${kind}" data-qid="${q.id}">Nhận thưởng</button>` : ''}
+      </div>`;
+    }).join('');
+  }
+  function renderQuests() {
+    const q = (me && me.quests) || { daily: [], rank: [], guard: [] };
+    let html = questBlock('📅 Nhiệm vụ ngày', q.daily, 'daily');
+    if (me && me.role === 'guard') html += questBlock('👮 Nhiệm vụ Quản giáo', q.guard, 'guard');
+    else html += questBlock('🎖️ Nhiệm vụ lên cấp', q.rank, 'rank');
+    return html || '<div class="meta">Chưa có nhiệm vụ.</div>';
+  }
+  function renderGuardPanel() {
+    if (!me || me.role !== 'guard') {
+      return `<div class="meta">Bạn đang là tù nhân. Vượt ngục thành công để trở thành Quản giáo.</div>
+        <p class="ghi">Cấp bậc: Hạ sĩ → Trung sĩ → Thiếu úy → Trung úy → Đại úy → Giám thị.</p>`;
+    }
+    const g = me.guardRank || {};
+    const pending = (me.pendingBribes || []);
+    return `<div class="pcard">
+      <div class="pcard-row"><span>Cấp</span><b>${g.emoji || '👮'} ${g.name || 'Hạ sĩ'}</b></div>
+      <div class="pcard-row"><span>XP QG</span><b>${g.xp || 0}${g.nextXp != null ? ' / ' + g.nextXp : ''}</b></div>
+      <div class="pcard-row"><span>Liêm chính</span><b>${g.integrity || 0}</b></div>
+      <div class="pcard-row"><span>Tuần tra / Bắt / Điểm danh</span><b>${me.guardPatrols || 0} / ${me.guardCatches || 0} / ${me.guardRolls || 0}</b></div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:8px;margin-top:10px">
+      <button class="btn pri" data-gact="patrol">🪖 Tuần tra (+XP)</button>
+      <button class="btn pri" data-gact="roll">📋 Điểm danh</button>
+      <button class="btn" data-gact="catch">🚨 Bắt vượt ngục (tại tường rào)</button>
+    </div>
+    <h3 style="margin:12px 0 6px;font-size:14px;color:var(--accent)">💰 Hối lộ đang chờ</h3>
+    ${pending.length ? pending.map((b) => `<div class="list"><li><span>${escapeHtml(b.fromNick)} · ${b.amount}₫</span>
+      <span><button class="btn sm" data-bribe-resp="1" data-from="${b.fromId}">Nhận</button>
+      <button class="btn sm" data-bribe-resp="0" data-from="${b.fromId}">Từ chối (+liêm chính)</button></span></li></div>`).join('') : '<div class="meta">Không có.</div>'}
+    ${questBlock('Nhiệm vụ QG', (me.quests && me.quests.guard) || [], 'guard')}`;
   }
   function renderBoard() {
     const lb = world.leaderboard || {};
@@ -445,6 +552,8 @@
       <div class="pcard-row"><span>Xếp loại</span><b>${escapeHtml(me.rehabRatingLabel || 'Kém')}</b></div>
       <div class="pcard-row"><span>Điểm cải tạo</span><b>${me.rehabPoints || 0}</b></div>
       <div class="pcard-row"><span>Tiền / thắng</span><b>${me.money}₫ · 🏆${me.gameWins || 0}</b></div>
+      <div class="pcard-row"><span>Vai trò</span><b>${me.role === 'guard' ? '👮 Quản giáo' : '🧑‍🦱 Tù nhân'}</b></div>
+      <div class="pcard-row"><span>Phòng giam</span><b>Số ${me.cellNo || '—'} (${me.cellId || '—'})</b></div>
       <div class="pcard-row"><span>Hạng tù nhân</span><b>${(me.rank && me.rank.emoji) || '🐣'} ${(me.rank && me.rank.name) || 'Tù mới'}</b></div>
       <div class="pcard-row"><span>XP hạng</span><b>${me.rankXp || 0}${(me.rank && me.rank.nextXp != null) ? ' / ' + me.rank.nextXp : ''}</b></div>
       <div class="pcard-row"><span>Ưu đãi hạng</span><b>+${Math.round(((me.rank && me.rank.payBonus) || 0) * 100)}% lương · −${Math.round(((me.rank && me.rank.shopDiscount) || 0) * 100)}% shop</b></div>
@@ -556,6 +665,7 @@
     if (!m) { overlay.hidden = true; return; }
     overlay.hidden = false;
     const card = $('#match-card');
+    const closeBtn = '<button class="btn" id="btn-close-match" type="button">Đóng</button>';
     if (m.game === 'caro') {
       const cells = m.board.map((row, y) => row.map((c, x) => {
         const mark = c === 1 ? 'X' : c === 2 ? 'O' : '';
@@ -563,12 +673,11 @@
         return `<button class="caro-cell" data-x="${x}" data-y="${y}" ${dis}>${mark}</button>`;
       }).join('')).join('');
       card.innerHTML = `<h2>Cờ Caro</h2><p>${escapeHtml(m.message || '')}</p>
-        <div class="caro-board">${cells}</div>
-        <button class="btn" id="btn-close-match" type="button">Đóng</button>`;
+        <div class="caro-board">${cells}</div>${closeBtn}`;
       card.querySelectorAll('.caro-cell').forEach((b) => {
         b.onclick = () => socket.emit('caroMove', { matchId: m.id, x: +b.dataset.x, y: +b.dataset.y });
       });
-    } else {
+    } else if (m.game === 'rps') {
       card.innerHTML = `<h2>Kéo Búa Bao (BO3)</h2>
         <p>${escapeHtml(m.message || '')}</p>
         <p>Tỉ số: ${m.scores ? `${m.scores[1]} – ${m.scores[2]}` : ''}</p>
@@ -576,11 +685,51 @@
           <button class="btn" data-rps="rock" ${m.status !== 'playing' ? 'disabled' : ''}>✊</button>
           <button class="btn" data-rps="paper" ${m.status !== 'playing' ? 'disabled' : ''}>✋</button>
           <button class="btn" data-rps="scissors" ${m.status !== 'playing' ? 'disabled' : ''}>✌️</button>
-        </div>
-        <button class="btn" id="btn-close-match" type="button">Đóng</button>`;
+        </div>${closeBtn}`;
       card.querySelectorAll('[data-rps]').forEach((b) => {
         b.onclick = () => socket.emit('rpsChoice', { matchId: m.id, choice: b.dataset.rps });
       });
+    } else if (m.game === 'quiz') {
+      const q = m.quiz || { q: '…', a: [] };
+      card.innerHTML = `<h2>🧠 Đố vui</h2><p>${escapeHtml(m.message || '')}</p>
+        <p><b>${escapeHtml(q.q || '')}</b></p>
+        <p>Điểm: ${m.scores ? `${m.scores[1]} – ${m.scores[2] || 0}` : ''}</p>
+        <div style="display:flex;flex-direction:column;gap:6px">
+          ${(q.a || []).map((a, i) => `<button class="btn" data-quiz="${i}" ${m.status !== 'playing' ? 'disabled' : ''}>${escapeHtml(a)}</button>`).join('')}
+        </div>${closeBtn}`;
+      card.querySelectorAll('[data-quiz]').forEach((b) => {
+        b.onclick = () => socket.emit('quizAnswer', { matchId: m.id, answer: +b.dataset.quiz });
+      });
+    } else if (m.game === 'ball') {
+      card.innerHTML = `<h2>🏀 Ném bóng rổ</h2><p>${escapeHtml(m.message || '')}</p>
+        <p>Tỉ số: ${m.scores ? `${m.scores[1]} – ${m.scores[2] || 0}` : ''} · Lượt: ${m.ballShots || 0}/6</p>
+        <label>Lực ném (nhắm ~72): <input id="ball-power" type="range" min="0" max="100" value="70" /></label>
+        <button class="btn pri" id="btn-ball" ${m.status !== 'playing' ? 'disabled' : ''}>Ném!</button>
+        ${closeBtn}`;
+      const bb = $('#btn-ball');
+      if (bb) bb.onclick = () => socket.emit('ballShoot', { matchId: m.id, power: +$('#ball-power').value });
+    } else if (m.game === 'oanquan') {
+      const pits = (m.board && m.board.pits) || [];
+      card.innerHTML = `<h2>🟡 Ô ăn quan lite</h2><p>${escapeHtml(m.message || '')}</p>
+        <div style="display:grid;grid-template-columns:repeat(6,1fr);gap:4px;margin:8px 0">
+          ${[6,7,8,9,10,11].map((i) => `<button class="btn sm" data-pit="${i}" ${i===11||m.status!=='playing'?'disabled':''}>${pits[i]||0}</button>`).join('')}
+          ${[5,4,3,2,1,0].map((i) => `<button class="btn sm" data-pit="${i}" ${i===5||m.status!=='playing'?'disabled':''}>${pits[i]||0}</button>`).join('')}
+        </div>
+        <p class="meta">Chọn ô phía bạn (hàng dưới, trừ quan).</p>${closeBtn}`;
+      card.querySelectorAll('[data-pit]').forEach((b) => {
+        b.onclick = () => socket.emit('oanquanMove', { matchId: m.id, pit: +b.dataset.pit });
+      });
+    } else if (m.game === 'tienlen') {
+      card.innerHTML = `<h2>🃏 Tiến lên lite</h2><p>${escapeHtml(m.message || '')}</p>
+        <p>Bài của bạn (ẩn lực): chọn số lá 2–14 (A=14)</p>
+        <input id="tl-card" type="number" min="2" max="14" value="${m.hand || 7}" style="width:80px" />
+        <button class="btn pri" id="btn-tl" ${m.status !== 'playing' ? 'disabled' : ''}>Đánh bài</button>
+        ${m.lastRound ? `<p>Bạn ${m.lastRound.you} vs Đối ${m.lastRound.opp}</p>` : ''}
+        ${closeBtn}`;
+      const bt = $('#btn-tl');
+      if (bt) bt.onclick = () => socket.emit('tienlenPlay', { matchId: m.id, card: +$('#tl-card').value });
+    } else {
+      card.innerHTML = `<h2>Mini-game</h2><p>${escapeHtml(m.message || '')}</p>${closeBtn}`;
     }
     const cl = $('#btn-close-match');
     if (cl) cl.onclick = () => socket.emit('closeMatch', { matchId: m.id });
@@ -642,7 +791,7 @@
       // cooking ambience in kitchen
       if (p.room === 'nha_bep' && otuAudio) otuAudio.cook();
     }
-    if (sideMode === 'stats' || sideMode === 'profile' || sideMode === 'achievements' || sideMode === 'more') openSide(sideMode);
+    if (sideMode === 'stats' || sideMode === 'profile' || sideMode === 'achievements' || sideMode === 'more' || sideMode === 'quests' || sideMode === 'guard') openSide(sideMode);
   });
 
   socket.on('world', (w) => {
@@ -652,7 +801,7 @@
       world3d.syncPlayers(w.players || []);
       if (w.guards) world3d.syncGuards(w.guards);
     }
-    if (sideMode === 'board' || sideMode === 'games' || sideMode === 'rooms') openSide(sideMode);
+    if (sideMode === 'board' || sideMode === 'games' || sideMode === 'rooms' || sideMode === 'quests' || sideMode === 'guard') openSide(sideMode);
   });
 
   socket.on('poses', (list) => {
@@ -712,7 +861,8 @@
   socket.on('gameInvite', (inv) => {
     const el = $('#invite-toast');
     el.hidden = false;
-    el.innerHTML = `<b>${escapeHtml(inv.fromNick)}</b> mời bạn chơi ${inv.game === 'caro' ? 'Cờ Caro' : 'Kéo Búa Bao'}.
+    const gLabels = { caro: 'Cờ Caro', rps: 'Kéo Búa Bao', quiz: 'Đố vui', ball: 'Ném bóng', oanquan: 'Ô ăn quan', tienlen: 'Tiến lên' };
+    el.innerHTML = `<b>${escapeHtml(inv.fromNick)}</b> mời bạn chơi ${gLabels[inv.game] || inv.game}.
       <div style="display:flex;gap:8px;margin-top:10px">
         <button class="btn pri" id="inv-ok">Chấp nhận</button>
         <button class="btn" id="inv-no">Từ chối</button>
@@ -723,9 +873,30 @@
   socket.on('escapeResult', (r) => {
     if (otuAudio) { unlockAudio(); otuAudio.alert(); }
     $('#escape-overlay').hidden = false;
-    $('#escape-title').textContent = r.success ? 'Vượt ngục thành công!' : 'Vượt ngục thất bại';
-    $('#escape-detail').textContent = r.message || '';
-    if (!r.success) setTimeout(() => { $('#escape-overlay').hidden = true; }, 2800);
+    if (r.success && r.becameGuard) {
+      $('#escape-title').textContent = '👮 Trở thành Quản giáo!';
+      $('#escape-detail').textContent = r.message || '';
+      $('#btn-replay').textContent = 'Tiếp tục tuần tra';
+      $('#btn-replay').onclick = () => { $('#escape-overlay').hidden = true; openSide('guard'); };
+    } else if (r.success) {
+      $('#escape-title').textContent = 'Vượt ngục thành công!';
+      $('#escape-detail').textContent = r.message || '';
+    } else {
+      $('#escape-title').textContent = r.reset ? '🚨 Bắt giữ — án tính lại từ đầu' : 'Vượt ngục thất bại';
+      $('#escape-detail').textContent = r.message || '';
+      setTimeout(() => { $('#escape-overlay').hidden = true; }, 3200);
+    }
+  });
+  socket.on('roleChanged', (r) => {
+    toast(r.message || 'Đổi vai trò');
+    if (r.role === 'guard') openSide('guard');
+  });
+  socket.on('guardRankUp', (payload) => {
+    toast((payload && payload.message) || 'Thăng cấp Quản giáo!');
+  });
+  socket.on('bribeOffer', (o) => {
+    toast(`💰 ${o.fromNick} hối lộ ${o.amount}₫ — mở panel Quản giáo để xử lý`);
+    if (sideMode === 'guard') openSide('guard');
   });
   socket.on('released', (r) => {
     $('#escape-overlay').hidden = false;

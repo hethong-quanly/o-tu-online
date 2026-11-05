@@ -5,6 +5,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const { createClient } = require('@supabase/supabase-js');
+const v6 = require('./lib/v6');
 
 const PORT = process.env.PORT || 3847;
 const DATA_FILE = path.join(__dirname, 'data', 'players.json');
@@ -18,7 +19,7 @@ const supabase = useSupabase
   : null;
 const MAX_PLAYERS = Math.max(1, parseInt(process.env.MAX_PLAYERS || '10000', 10) || 10000);
 const NPC_COUNT = Math.max(0, parseInt(process.env.NPC_COUNT || '16', 10) || 16);
-const VERSION = '3d-v5';
+const VERSION = '3d-v6';
 
 /** Guard NPCs — patrol, vision, bribe window (in-game money only) */
 const GUARD_DEFS = [
@@ -168,6 +169,9 @@ app.get('/manifest.json', (req, res) => {
   res.type('application/manifest+json');
   res.sendFile(path.join(__dirname, 'public', 'manifest.json'));
 });
+app.get('/privacy', (_req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'privacy.html'));
+});
 app.use(express.static(path.join(__dirname, 'public'), {
   setHeaders(res, filePath) {
     if (filePath.endsWith('sw.js')) {
@@ -190,27 +194,38 @@ const SHOP = {
   dung_cu_vuot: { id: 'dung_cu_vuot', name: 'Dụng cụ vượt ngục', emoji: '🗝️', price: 200, maxLevel: 3, description: '+12% tỉ lệ vượt ngục / cấp' },
 };
 
-const ROOMS = [
-  { id: 'phong_a', name: 'Phòng giam A', emoji: '🚪', x: -4, z: -14 },
-  { id: 'phong_b', name: 'Phòng giam B', emoji: '🚪', x: 4, z: -14 },
-  { id: 'san_tap', name: 'Sảnh / Căn tin', emoji: '🍽️', x: 0, z: 0 },
-  { id: 'nha_bep', name: 'Nhà ăn / Bếp', emoji: '🍳', x: 16, z: 8 },
-  { id: 'xuong', name: 'Xưởng lao động', emoji: '🏭', x: -16, z: 8 },
-  { id: 'tuong_rao', name: 'Sân chơi / Tường rào', emoji: '🏀', x: 0, z: 26 },
-  { id: 'bang_thu', name: 'Bảng Vinh danh', emoji: '📋', x: -16, z: -2 },
-];
+let ROOMS = [];
+let ROOM_BY_ID = {};
+let ROOM_GRAPH = {};
+let CELL_COUNT = v6.MIN_CELLS;
 
-const ROOM_BY_ID = Object.fromEntries(ROOMS.map((r) => [r.id, r]));
+function applyRoomLayout(cellCount) {
+  CELL_COUNT = Math.max(v6.MIN_CELLS, Math.min(v6.MAX_CELLS, cellCount | 0));
+  const built = v6.rebuildRooms(CELL_COUNT);
+  ROOMS = built.rooms;
+  ROOM_BY_ID = built.byId;
+  ROOM_GRAPH = built.graph;
+}
+applyRoomLayout(v6.MIN_CELLS);
 
-const ROOM_GRAPH = {
-  phong_a: ['san_tap', 'phong_b', 'xuong', 'bang_thu'],
-  phong_b: ['san_tap', 'phong_a', 'nha_bep', 'bang_thu'],
-  san_tap: ['phong_a', 'phong_b', 'nha_bep', 'xuong', 'tuong_rao', 'bang_thu'],
-  nha_bep: ['san_tap', 'phong_b'],
-  xuong: ['san_tap', 'phong_a', 'tuong_rao'],
-  tuong_rao: ['san_tap', 'xuong'],
-  bang_thu: ['san_tap', 'phong_a', 'phong_b'],
-};
+function rescaleCells() {
+  const pop = online.size + Object.keys(playersByNick).length;
+  const need = v6.neededCellCount(Math.max(online.size, Math.ceil(pop / 4)));
+  if (need !== CELL_COUNT) {
+    applyRoomLayout(need);
+    // keep players in valid rooms
+    for (const p of online.values()) {
+      if (p.role === 'guard') continue;
+      if (!ROOM_BY_ID[p.room]) {
+        const cell = ROOM_BY_ID[p.cellId] || v6.pickCell(online, ROOMS);
+        p.cellId = cell.id;
+        p.room = cell.id;
+        p.x = cell.x + (Math.random() - 0.5) * 2;
+        p.z = cell.z + (Math.random() - 0.5) * 2;
+      }
+    }
+  }
+}
 
 const APPEARANCE = {
   skins: ['#e0b090', '#c68642', '#8d5524', '#f1c27d', '#ffdbac'],
@@ -219,6 +234,7 @@ const APPEARANCE = {
     { id: 'orange', light: '#ff7a1a', dark: '#e86810', name: 'Áo cam' },
     { id: 'bw', light: '#f5f5f5', dark: '#151515', name: 'Sọc trắng–đen' },
     { id: 'blue', light: '#e8f0ff', dark: '#1a3050', name: 'Sọc xanh' },
+    { id: 'police', light: '#2a4a7a', dark: '#0d1b2a', name: 'Đồng phục quản giáo' },
   ],
 };
 
@@ -243,10 +259,12 @@ const SENTENCE_OPTIONS = [
 ];
 
 const SCHEDULE = [
-  { id: 'an', name: 'Giờ ăn', emoji: '🍲', roomHint: 'nha_bep', seconds: 50, announce: '📢 Loa trại: Giờ ăn! Tập trung Nhà ăn / Bếp.' },
-  { id: 'tap', name: 'Giờ tập', emoji: '🏋️', roomHint: 'san_tap', seconds: 50, announce: '📢 Loa trại: Giờ tập thể dục trên Sân trại!' },
-  { id: 'tat_den', name: 'Tắt đèn', emoji: '🌙', roomHint: 'phong_a', seconds: 50, announce: '📢 Loa trại: Giờ tắt đèn. Về phòng nghỉ.' },
+  { id: 'an', name: 'Giờ ăn', emoji: '🍲', roomHint: 'nha_bep', seconds: 55, graceSec: 12, announce: '📢 Quản giáo: Giờ ăn! Vào Nhà ăn / Bếp. Vắng mặt sẽ bị trừ điểm.' },
+  { id: 'lao_dong', name: 'Giờ lao động', emoji: '⛏️', roomHint: 'xuong', seconds: 55, graceSec: 12, announce: '📢 Quản giáo: Giờ lao động! Ra Sân lao động / Xưởng ngay.' },
+  { id: 'tat_den', name: 'Giờ ngủ / Tắt đèn', emoji: '🌙', roomHint: 'cell', seconds: 55, graceSec: 15, announce: '📢 Quản giáo: Tắt đèn! Về đúng phòng giam của mình nghỉ.' },
 ];
+const scheduleWarned = new Map(); // key -> Set(sid)
+const schedulePenalized = new Map();
 
 const ACHIEVEMENTS = [
   { id: 'work_5', name: 'Công nhân cần cù', desc: 'Hoàn thành 5 ca làm việc', stat: 'workCount', target: 5, points: 15 },
@@ -345,7 +363,8 @@ function defaultPlayer(payload, socketId) {
     ? String(payload.crimeCustom || 'Tội danh bí ẩn').trim().slice(0, 48) || 'Tội danh bí ẩn'
     : crime.label;
   const sent = SENTENCE_OPTIONS.find((s) => s.id === payload.sentenceId) || SENTENCE_OPTIONS[1];
-  const room = ROOM_BY_ID.phong_a;
+  rescaleCells();
+  const cell = v6.pickCell(online, ROOMS);
   return {
     id: socketId,
     nickname: payload.nickname,
@@ -374,9 +393,12 @@ function defaultPlayer(payload, socketId) {
     energy: 100,
     maxEnergy: 100,
     reputation: 0,
-    room: 'phong_a',
-    x: room.x + (Math.random() - 0.5) * 3,
-    z: room.z + (Math.random() - 0.5) * 3,
+    role: 'prisoner',
+    cellId: cell.id,
+    cellNo: cell.cellNo,
+    room: cell.id,
+    x: cell.x + (Math.random() - 0.5) * 3,
+    z: cell.z + (Math.random() - 0.5) * 3,
     rotY: 0,
     upgrades: { giuong: 0, cong_cu: 0, dung_cu_vuot: 0 },
     cooldowns: {},
@@ -386,6 +408,10 @@ function defaultPlayer(payload, socketId) {
     daysMarked: 0,
     winsCaro: 0,
     winsRps: 0,
+    winsQuiz: 0,
+    winsBall: 0,
+    winsOanQuan: 0,
+    winsTienLen: 0,
     gameWins: 0,
     appearance: normalizeAppearance(payload.appearance),
     emote: null,
@@ -395,6 +421,17 @@ function defaultPlayer(payload, socketId) {
     lastActive: Date.now(),
     lastDayTick: Date.now(),
     daysSinceReview: 0,
+    daily: null,
+    rankQuestClaimed: {},
+    guardXp: 0,
+    guardRankId: 'ha_si',
+    guardIntegrity: 0,
+    guardPatrols: 0,
+    guardCatches: 0,
+    guardRolls: 0,
+    guardRefuseBribes: 0,
+    guardQuestClaimed: {},
+    pendingBribes: [],
   };
 }
 
@@ -606,6 +643,15 @@ function publicPlayer(p) {
     rehabRatingLabel: rating.label,
     rank: rankPublic(p),
     rankXp: p.rankXp || 0,
+    role: p.role || 'prisoner',
+    cellId: p.cellId || null,
+    cellNo: p.cellNo || null,
+    quests: v6.questProgress(p),
+    guardRank: (p.role === 'guard') ? (() => {
+      const g = v6.guardRankFromXp(p.guardXp || 0);
+      const n = v6.nextGuardRank(p.guardXp || 0);
+      return { id: g.id, name: g.name, emoji: g.emoji, xp: p.guardXp || 0, nextXp: n ? n.xp : null, nextName: n ? n.name : null, integrity: p.guardIntegrity || 0 };
+    })() : null,
     achievements: computeAchievementProgress(p),
     money: Math.floor(p.money),
     health: Math.round(p.health),
@@ -629,10 +675,20 @@ function publicPlayer(p) {
     daysMarked: p.daysMarked || 0,
     winsCaro: p.winsCaro || 0,
     winsRps: p.winsRps || 0,
+    winsQuiz: p.winsQuiz || 0,
+    winsBall: p.winsBall || 0,
+    winsOanQuan: p.winsOanQuan || 0,
+    winsTienLen: p.winsTienLen || 0,
     gameWins: p.gameWins || 0,
     workCount: p.workCount || 0,
     lettersSent: p.lettersSent || 0,
     scheduleAttend: p.scheduleAttend || 0,
+    guardPatrols: p.guardPatrols || 0,
+    guardCatches: p.guardCatches || 0,
+    guardRolls: p.guardRolls || 0,
+    guardRefuseBribes: p.guardRefuseBribes || 0,
+    guardIntegrity: p.guardIntegrity || 0,
+    pendingBribes: p.role === 'guard' ? (p.pendingBribes || []).slice(-5) : [],
     appearance: p.appearance || normalizeAppearance(null),
     emote: p.emote && Date.now() < p.emoteUntil ? p.emote : null,
     sleeping: !!p.sleeping,
@@ -700,7 +756,11 @@ function totalDaysMarked() {
 }
 
 function broadcastState() {
-  const list = [...online.values()].filter((p) => !p.escaped && !p.released).map(publicPlayer);
+  const list = [...online.values()].filter((p) => {
+    if (p.role === 'guard') return true;
+    if (p.escaped || p.released) return false;
+    return true;
+  }).map(publicPlayer);
   io.emit('world', {
     players: list,
     rooms: ROOMS,
@@ -714,6 +774,8 @@ function broadcastState() {
     totalDaysMarked: totalDaysMarked(),
     schedule: currentSchedule(),
     letters: letters.slice(-20).reverse(),
+    cellCount: CELL_COUNT,
+    cellCapacity: v6.CELL_CAPACITY,
   });
 }
 
@@ -729,25 +791,77 @@ function pushChat(entry) {
 
 function failEscapeCatch(p, socket, reason) {
   p.escapeFails = (p.escapeFails || 0) + 1;
-  p.health = Math.max(5, p.health - 25);
-  p.money = Math.max(0, p.money - 30);
-  p.reputation = Math.max(0, p.reputation - 10);
-  p.sentenceLeftDays = (p.sentenceLeftDays || 0) + 15;
-  p.rehabPoints = Math.max(0, (p.rehabPoints || 0) - 10);
-  delete p.achievementsUnlocked.good_behavior;
+  p.health = 40;
+  p.energy = 40;
+  p.money = 20;
+  p.reputation = 0;
+  p.rehabPoints = 0;
+  p.rankXp = 0;
+  p.rankId = 'tu_moi';
+  p.sentenceLeftDays = p.sentenceTotalDays || 90;
+  p.daysServed = 0;
+  p.achievementsUnlocked = {};
+  p.rankQuestClaimed = {};
+  p.daily = null;
   p.bribeGuardId = null; p.bribeUntil = 0;
-  p.room = 'phong_a';
-  p.x = ROOM_BY_ID.phong_a.x; p.z = ROOM_BY_ID.phong_a.z;
+  p.role = 'prisoner';
+  const cell = ROOM_BY_ID[p.cellId] || v6.pickCell(online, ROOMS);
+  p.cellId = cell.id; p.cellNo = cell.cellNo;
+  p.room = cell.id;
+  p.x = cell.x; p.z = cell.z;
   p.sleeping = false; p.emote = null;
-  const msg = `🚨 ${reason || 'Bị bắt!'} +15 ngày án.`;
+  const msg = `🚨 ${reason || 'Bị bắt!'} Toàn bộ điểm bị xóa — án tính lại từ đầu (${p.sentenceLeftDays} ngày)!`;
   if (socket) {
     emitSelf(socket, p);
-    socket.emit('escapeResult', { success: false, caught: true, message: msg });
+    socket.emit('escapeResult', { success: false, caught: true, reset: true, message: msg });
   }
-  pushChat({ type: 'system', text: `${p.nickname} bị cán bộ bắt khi vượt ngục (+15 ngày án).`, ts: Date.now() });
+  pushChat({ type: 'system', text: `${p.nickname} vượt ngục thất bại — mất hết điểm, ở tù lại từ đầu.`, ts: Date.now() });
   broadcastState();
   io.emit('guards', publicGuards());
   saveData();
+}
+
+function promoteToGuard(p, socket) {
+  p.role = 'guard';
+  p.escaped = false;
+  p.released = true;
+  p.earlyRelease = true;
+  p.releasedAt = Date.now();
+  p.bribeGuardId = null; p.bribeUntil = 0;
+  p.guardXp = p.guardXp || 0;
+  p.guardRankId = v6.guardRankFromXp(p.guardXp).id;
+  p.appearance = { ...(p.appearance || {}), stripe: 'police', skin: p.appearance?.skin || '#e0b090', hair: p.appearance?.hair || '#1a1a1a' };
+  p.room = 'san_tap';
+  p.x = 0; p.z = 2;
+  p.sleeping = false;
+  if (socket) {
+    emitSelf(socket, p);
+    socket.emit('escapeResult', {
+      success: true, becameGuard: true,
+      message: '🎉 Vượt ngục thành công! Bạn được nhận vào lực lượng Quản giáo. Đồng phục mới, nhiệm vụ mới!',
+      guardRank: v6.guardRankFromXp(p.guardXp),
+    });
+    socket.emit('roleChanged', { role: 'guard', message: 'Bạn đã trở thành Quản giáo.' });
+  }
+  pushChat({ type: 'system', text: `👮 ${p.nickname} vượt ngục thành công và trở thành Quản giáo!`, ts: Date.now() });
+  broadcastState();
+  saveData();
+}
+
+function grantGuardXp(p, amount, socket) {
+  if (!p || p.role !== 'guard' || !amount) return null;
+  const before = v6.guardRankFromXp(p.guardXp || 0);
+  p.guardXp = Math.max(0, (p.guardXp || 0) + amount);
+  const after = v6.guardRankFromXp(p.guardXp);
+  p.guardRankId = after.id;
+  if (after.id !== before.id && socket) {
+    socket.emit('guardRankUp', {
+      rank: after,
+      message: `${after.emoji} Thăng cấp Quản giáo: ${after.name}!`,
+    });
+    pushChat({ type: 'system', text: `${after.emoji} Quản giáo ${p.nickname} lên ${after.name}!`, ts: Date.now() });
+  }
+  return after;
 }
 
 function tickGuards() {
@@ -906,6 +1020,8 @@ setInterval(() => {
   const phase = SCHEDULE[scheduleIndex];
   scheduleEndsAt = Date.now() + phase.seconds * 1000;
   scheduleAttended.set(`${scheduleIndex}-${scheduleEndsAt}`, new Set());
+  scheduleWarned.set(`${scheduleIndex}-${scheduleEndsAt}`, new Set());
+  schedulePenalized.set(`${scheduleIndex}-${scheduleEndsAt}`, new Set());
   pushChat({ type: 'system', text: phase.announce, ts: Date.now() });
   if (phase.id !== 'tat_den') {
     for (const p of online.values()) if (p.sleeping) p.sleeping = false;
@@ -914,23 +1030,29 @@ setInterval(() => {
   io.emit('schedule', currentSchedule());
 }, 2000);
 
-// credit schedule attendance mid-phase
+// Mandatory schedule: credit attendance, warn after grace, then penalize absentees
 setInterval(() => {
   const phase = SCHEDULE[scheduleIndex];
   const key = `${scheduleIndex}-${scheduleEndsAt}`;
   if (!scheduleAttended.has(key)) scheduleAttended.set(key, new Set());
+  if (!scheduleWarned.has(key)) scheduleWarned.set(key, new Set());
+  if (!schedulePenalized.has(key)) schedulePenalized.set(key, new Set());
   const set = scheduleAttended.get(key);
+  const warned = scheduleWarned.get(key);
+  const penalized = schedulePenalized.get(key);
+  const elapsed = Math.max(0, (phase.seconds * 1000) - Math.max(0, scheduleEndsAt - Date.now()));
+  const graceMs = (phase.graceSec || 12) * 1000;
   for (const [sid, p] of online) {
     if (p.escaped || p.released) continue;
-    let ok = false;
-    if (phase.id === 'an' && p.room === 'nha_bep') ok = true;
-    if (phase.id === 'tap' && p.room === 'san_tap') ok = true;
-    if (phase.id === 'tat_den' && String(p.room).startsWith('phong')) ok = true;
+    if (p.role === 'guard') continue;
+    const ok = v6.inRequiredPlace(phase, p);
+    const sock = io.sockets.sockets.get(sid);
     if (ok && !set.has(sid)) {
       set.add(sid);
       p.scheduleAttend = (p.scheduleAttend || 0) + 1;
       p.rehabPoints = (p.rehabPoints || 0) + 2;
-      const sock = [...io.sockets.sockets.values()].find((s) => s.id === sid);
+      const d = v6.ensureDaily(p);
+      d.daySched = (d.daySched || 0) + 1;
       grantRankXp(p, 6, sock);
       unlockAchievements(p, sock);
       if (sock) {
@@ -938,8 +1060,28 @@ setInterval(() => {
         emitSelf(sock, p);
       }
     }
+    if (!ok && elapsed >= graceMs && !warned.has(sid)) {
+      warned.add(sid);
+      const where = phase.id === 'tat_den' ? `phòng ${p.cellNo || p.cellId}` : (ROOM_BY_ID[phase.roomHint]?.name || phase.roomHint);
+      if (sock) sock.emit('errorMsg', `⚠️ Quản giáo nhắc: mau tới ${where}! Sắp trừ điểm.`);
+      pushChat({ type: 'system', text: `⚠️ Quản giáo gọi tên ${p.nickname} — vắng ${phase.name}.`, ts: Date.now() });
+    }
+    if (!ok && elapsed >= graceMs + 8000 && !penalized.has(sid) && !set.has(sid)) {
+      penalized.add(sid);
+      p.rehabPoints = Math.max(0, (p.rehabPoints || 0) - 8);
+      p.rankXp = Math.max(0, (p.rankXp || 0) - 5);
+      p.rankId = rankFromXp(p.rankXp).id;
+      if (sock) {
+        sock.emit('actionResult', {
+          kind: 'schedule_penalty',
+          message: `❌ Vắng ${phase.name}: −8 điểm cải tạo, −5 XP hạng. Quản giáo ghi sổ!`,
+        });
+        emitSelf(sock, p);
+      }
+      pushChat({ type: 'system', text: `📝 ${p.nickname} bị trừ điểm vì vắng ${phase.name}.`, ts: Date.now() });
+    }
   }
-}, 5000);
+}, 3000);
 
 function emptyCaro() {
   return Array.from({ length: 15 }, () => Array(15).fill(0));
@@ -981,16 +1123,26 @@ function caroNpcMove(board) {
 function awardWin(p, kind, socket) {
   if (kind === 'caro') p.winsCaro = (p.winsCaro || 0) + 1;
   if (kind === 'rps') p.winsRps = (p.winsRps || 0) + 1;
+  if (kind === 'quiz') p.winsQuiz = (p.winsQuiz || 0) + 1;
+  if (kind === 'ball') p.winsBall = (p.winsBall || 0) + 1;
+  if (kind === 'oanquan') p.winsOanQuan = (p.winsOanQuan || 0) + 1;
+  if (kind === 'tienlen') p.winsTienLen = (p.winsTienLen || 0) + 1;
   p.gameWins = (p.gameWins || 0) + 1;
   p.reputation += 3;
   p.money += 10;
   p.totalEarned += 10;
   p.rehabPoints = (p.rehabPoints || 0) + 3;
+  const d = v6.ensureDaily(p);
+  d.dayWins = (d.dayWins || 0) + 1;
   grantRankXp(p, 15, socket);
   unlockAchievements(p, socket);
 }
 
 function publicMatch(m) {
+  const quizQ = (m.game === 'quiz' && m.quiz) ? (() => {
+    const q = v6.QUIZ_BANK[m.quiz.idx % v6.QUIZ_BANK.length];
+    return { q: q.q, a: q.a, asked: m.quiz.asked };
+  })() : null;
   return {
     id: m.id, game: m.game, vsNpc: m.vsNpc, status: m.status,
     players: m.players.map((pid) => {
@@ -999,6 +1151,7 @@ function publicMatch(m) {
     }),
     youAre: null, board: m.board || null, turn: m.turn, turnEndsAt: m.turnEndsAt,
     scores: m.scores || null, lastRound: m.lastRound || null, winnerId: m.winnerId || null, message: m.message || '',
+    quiz: quizQ, ballShots: m.ballShots || 0, hand: m.hand || null, hands: m.hands || null,
   };
 }
 
@@ -1020,6 +1173,8 @@ io.on('connection', (socket) => {
   socket.emit('config', {
     jobs: JOBS, shop: SHOP, rooms: ROOMS, appearance: APPEARANCE, roomGraph: ROOM_GRAPH,
     crimes: CRIMES, sentences: SENTENCE_OPTIONS, achievements: ACHIEVEMENTS, ranks: RANKS,
+    guardRanks: v6.GUARD_RANKS, dailyQuests: v6.DAILY_QUESTS, rankQuests: v6.RANK_QUESTS, guardQuests: v6.GUARD_QUESTS,
+    cellCapacity: v6.CELL_CAPACITY, cellCount: CELL_COUNT,
     schedule: currentSchedule(), dayTickMs: DAY_TICK_MS, reviewEveryDays: REVIEW_EVERY_DAYS,
     maxPlayers: MAX_PLAYERS, npcCount: NPC_COUNT, version: VERSION,
   });
@@ -1098,6 +1253,35 @@ io.on('connection', (socket) => {
     }
     p.rankXp = p.rankXp || 0;
     p.rankId = rankFromXp(p.rankXp).id;
+    p.role = p.role || 'prisoner';
+    // Restore guard career if previously promoted
+    if (playersByNick[key] && playersByNick[key].role === 'guard') {
+      p.role = 'guard';
+      p.guardXp = playersByNick[key].guardXp || 0;
+      p.guardRankId = v6.guardRankFromXp(p.guardXp).id;
+      p.appearance = { ...(p.appearance || {}), stripe: 'police' };
+      p.released = true;
+    }
+    rescaleCells();
+    if (p.role !== 'guard') {
+      if (!p.cellId || !ROOM_BY_ID[p.cellId]) {
+        const cell = v6.pickCell(online, ROOMS);
+        p.cellId = cell.id;
+        p.cellNo = cell.cellNo;
+      } else {
+        p.cellNo = (ROOM_BY_ID[p.cellId] && ROOM_BY_ID[p.cellId].cellNo) || p.cellNo;
+      }
+      if (!ROOM_BY_ID[p.room]) {
+        p.room = p.cellId;
+        p.x = ROOM_BY_ID[p.cellId].x;
+        p.z = ROOM_BY_ID[p.cellId].z;
+      }
+    } else {
+      p.room = p.room && ROOM_BY_ID[p.room] ? p.room : 'san_tap';
+    }
+    v6.ensureDaily(p);
+    if (!p.rankQuestClaimed) p.rankQuestClaimed = {};
+    if (!p.guardQuestClaimed) p.guardQuestClaimed = {};
 
     // unlock good_behavior baseline check later; grant clean if no fails
     unlockAchievements(p, socket);
@@ -1113,7 +1297,8 @@ io.on('connection', (socket) => {
 
   function doRoomMove(roomId) {
     const p = online.get(socket.id);
-    if (!p || p.escaped || p.released) return;
+    if (!p) return;
+    if (p.role !== 'guard' && (p.escaped || p.released)) return;
     if (!ROOM_BY_ID[roomId]) return;
     if (p.sleeping) p.sleeping = false;
     if (p.energy < 2) { socket.emit('errorMsg', 'Không đủ năng lượng để di chuyển!'); return; }
@@ -1130,7 +1315,8 @@ io.on('connection', (socket) => {
 
   socket.on('pos', (payload) => {
     const p = online.get(socket.id);
-    if (!p || p.escaped || p.released) return;
+    if (!p) return;
+    if (p.role !== 'guard' && (p.escaped || p.released)) return;
     if (!payload || typeof payload.x !== 'number' || typeof payload.z !== 'number') return;
     const x = Math.max(-40, Math.min(40, payload.x));
     const z = Math.max(-40, Math.min(45, payload.z));
@@ -1174,11 +1360,12 @@ io.on('connection', (socket) => {
       unlockAchievements(p, socket);
       socket.emit('actionResult', { kind, message: `Gạch thêm 1 ngày. Tổng: ${p.daysMarked}.` });
     } else if (kind === 'sleep') {
-      p.room = String(p.room).startsWith('phong') ? p.room : 'phong_a';
-      const r = ROOM_BY_ID[p.room];
-      p.x = r.x; p.z = r.z;
+      const cell = ROOM_BY_ID[p.cellId] || ROOM_BY_ID[p.room] || v6.pickCell(online, ROOMS);
+      p.cellId = cell.id; p.cellNo = cell.cellNo;
+      p.room = cell.id;
+      p.x = cell.x; p.z = cell.z;
       setEmote(p, 'sleep', 60000);
-      socket.emit('actionResult', { kind, message: 'Về phòng nghỉ… Zzz' });
+      socket.emit('actionResult', { kind, message: `Về phòng giam số ${cell.cellNo} nghỉ… Zzz` });
     } else if (kind === 'wake') {
       p.sleeping = false; p.emote = null;
       socket.emit('actionResult', { kind, message: 'Bạn thức dậy.' });
@@ -1195,6 +1382,7 @@ io.on('connection', (socket) => {
     letters.push({ id: uid(), nick: p.nickname, text: msg, ts: Date.now() });
     if (letters.length > MAX_LETTERS) letters.shift();
     p.lettersSent = (p.lettersSent || 0) + 1;
+    { const dL = v6.ensureDaily(p); dL.dayLetters = (dL.dayLetters || 0) + 1; }
     p.rehabPoints = (p.rehabPoints || 0) + 2;
     grantRankXp(p, 5, socket);
     setEmote(p, 'write', 5000);
@@ -1225,6 +1413,7 @@ io.on('connection', (socket) => {
     p.reputation += 1;
     p.workCount = (p.workCount || 0) + 1;
     p.rehabPoints = (p.rehabPoints || 0) + 2;
+    { const dW = v6.ensureDaily(p); dW.dayWork = (dW.dayWork || 0) + 1; }
     grantRankXp(p, 8, socket);
     p.health = Math.max(10, p.health - Math.floor(job.energyCost / 4));
     p.cooldowns[jobId] = now + job.cooldownMs;
@@ -1320,20 +1509,15 @@ io.on('connection', (socket) => {
     p.energy -= 30;
     const roll = Math.random() * 100;
     if (roll < chance) {
-      p.escaped = true;
       p.reputation += 50;
       p.money += 100;
       p.bribeGuardId = null; p.bribeUntil = 0;
       delete p.achievementsUnlocked.good_behavior;
+      promoteToGuard(p, socket);
       playersByNick[p.nickname.toLowerCase()] = stripTransient(p);
       saveData();
-      socket.emit('escapeResult', { success: true, chance, roll: Math.floor(roll), bribed, message: `🎉 Vượt ngục thành công${bribed ? ' nhờ “làm ngơ” của cán bộ' : ''}!` });
-      pushChat({ type: 'system', text: `🚨 ${p.nickname} VƯỢT NGỤC thành công!`, ts: Date.now() });
-      emitSelf(socket, p);
-      broadcastState();
-      setTimeout(() => { online.delete(socket.id); broadcastState(); }, 2000);
     } else {
-      failEscapeCatch(p, socket, bribed ? 'Cán bộ đổi ý kịp lúc!' : 'Cán bộ phát hiện khi bạn leo tường!');
+      failEscapeCatch(p, socket, bribed ? 'Cán bộ đổi ý kịp lúc — điểm bị xóa, án tính lại!' : 'Bị bắt khi leo tường — mất hết điểm, ở tù lại từ đầu!');
     }
   });
 
@@ -1347,17 +1531,32 @@ io.on('connection', (socket) => {
 
   socket.on('startGame', (payload) => {
     const p = online.get(socket.id);
-    if (!p || p.escaped || p.released) return;
+    if (!p) return;
+    if (p.role !== 'guard' && (p.escaped || p.released)) return;
     const game = payload && payload.game;
     const vs = payload && payload.vs;
-    if (game !== 'caro' && game !== 'rps') return;
+    if (!['caro', 'rps', 'quiz', 'ball', 'oanquan', 'tienlen'].includes(game)) return;
     if (vs === 'npc') {
+      const msgs = {
+        caro: 'Cờ Caro vs Quản giáo. Bạn đi trước (X).',
+        rps: 'Kéo Búa Bao BO3 vs Quản giáo.',
+        quiz: 'Đố vui vs Quản giáo — trả lời đúng để thắng.',
+        ball: 'Ném bóng rổ vs Quản giáo — ghi nhiều điểm hơn.',
+        oanquan: 'Ô ăn quan lite vs Quản giáo.',
+        tienlen: 'Tiến lên lite — đánh bài cao hơn NPC.',
+      };
       const m = {
         id: uid(), game, vsNpc: true, status: 'playing', players: [socket.id],
-        board: game === 'caro' ? emptyCaro() : null, turn: 1, turnEndsAt: Date.now() + 30000,
-        scores: game === 'rps' ? { 1: 0, 2: 0 } : null, choices: game === 'rps' ? {} : null,
+        board: game === 'caro' ? emptyCaro() : (game === 'oanquan' ? { pits: [5,5,5,5,5,0,5,5,5,5,5,0], turn: 1 } : null),
+        turn: 1, turnEndsAt: Date.now() + 45000,
+        scores: (game === 'rps' || game === 'ball') ? { 1: 0, 2: 0 } : (game === 'quiz' ? { 1: 0, 2: 0, q: 0 } : null),
+        choices: game === 'rps' ? {} : null,
+        quiz: game === 'quiz' ? { idx: Math.floor(Math.random() * v6.QUIZ_BANK.length), asked: 0 } : null,
+        ballShots: game === 'ball' ? 0 : null,
+        hand: game === 'tienlen' ? Math.floor(Math.random() * 13) + 2 : null,
+        npcHand: game === 'tienlen' ? Math.floor(Math.random() * 13) + 2 : null,
         round: 1, winnerId: null,
-        message: game === 'caro' ? 'Cờ Caro vs Quản giáo. Bạn đi trước (X).' : 'Kéo Búa Bao BO3 vs Quản giáo.',
+        message: msgs[game] || 'Mini-game bắt đầu.',
       };
       matches.set(m.id, m);
       emitMatch(m);
@@ -1384,10 +1583,18 @@ io.on('connection', (socket) => {
       return;
     }
     if (!online.has(inv.from) || !online.has(inv.to)) return;
+    const g = inv.game;
     const m = {
-      id: uid(), game: inv.game, vsNpc: false, status: 'playing', players: [inv.from, inv.to],
-      board: inv.game === 'caro' ? emptyCaro() : null, turn: 1, turnEndsAt: Date.now() + 30000,
-      scores: inv.game === 'rps' ? { 1: 0, 2: 0 } : null, choices: inv.game === 'rps' ? {} : null,
+      id: uid(), game: g, vsNpc: false, status: 'playing', players: [inv.from, inv.to],
+      board: g === 'caro' ? emptyCaro() : (g === 'oanquan' ? { pits: [5,5,5,5,5,0,5,5,5,5,5,0], turn: 1 } : null),
+      turn: 1, turnEndsAt: Date.now() + 45000,
+      scores: (g === 'rps' || g === 'ball' || g === 'quiz') ? { 1: 0, 2: 0 } : null,
+      choices: g === 'rps' ? {} : null,
+      quiz: g === 'quiz' ? { idx: Math.floor(Math.random() * v6.QUIZ_BANK.length), asked: 0 } : null,
+      ballShots: g === 'ball' ? 0 : null,
+      hand: g === 'tienlen' ? Math.floor(Math.random() * 13) + 2 : null,
+      npcHand: null,
+      hands: g === 'tienlen' ? { [inv.from]: Math.floor(Math.random()*13)+2, [inv.to]: Math.floor(Math.random()*13)+2 } : null,
       round: 1, winnerId: null, message: 'Trận đấu bắt đầu!',
     };
     matches.set(m.id, m);
@@ -1495,6 +1702,375 @@ io.on('connection', (socket) => {
       const sock = [...io.sockets.sockets.values()].find((s) => s.id === pid);
       if (sock) sock.emit('match', null);
     }
+  });
+
+
+  // --- v6 quests ---
+  socket.on('claimQuest', (payload) => {
+    const p = online.get(socket.id);
+    if (!p) return;
+    const kind = payload && payload.kind;
+    const id = payload && payload.id;
+    if (!kind || !id) return;
+    if (kind === 'daily') {
+      const d = v6.ensureDaily(p);
+      const q = v6.DAILY_QUESTS.find((x) => x.id === id);
+      if (!q) return;
+      if ((d[q.stat] || 0) < q.target) { socket.emit('errorMsg', 'Chưa hoàn thành nhiệm vụ.'); return; }
+      if (d.claimed && d.claimed[id]) { socket.emit('errorMsg', 'Đã nhận thưởng.'); return; }
+      d.claimed = d.claimed || {};
+      d.claimed[id] = true;
+      p.money += q.money; p.totalEarned += q.money;
+      if (p.role === 'guard') grantGuardXp(p, q.xp, socket); else grantRankXp(p, q.xp, socket);
+      socket.emit('actionResult', { kind: 'quest', message: `✅ ${q.name}: +${q.xp} XP, +${q.money}$` });
+    } else if (kind === 'rank') {
+      if (p.role === 'guard') { socket.emit('errorMsg', 'Nhiệm vụ hạng tù chỉ cho tù nhân.'); return; }
+      const q = v6.RANK_QUESTS.find((x) => x.id === id);
+      if (!q) return;
+      if ((p.rankXp || 0) < q.needXp) { socket.emit('errorMsg', 'Chưa đủ XP hạng.'); return; }
+      if (p.rankQuestClaimed && p.rankQuestClaimed[id]) { socket.emit('errorMsg', 'Đã nhận.'); return; }
+      p.rankQuestClaimed = p.rankQuestClaimed || {};
+      p.rankQuestClaimed[id] = true;
+      p.money += q.money; p.totalEarned += q.money;
+      grantRankXp(p, q.xp, socket);
+      p.rehabPoints = (p.rehabPoints || 0) + 5;
+      socket.emit('actionResult', { kind: 'quest', message: `🎖️ ${q.name}: +${q.xp} XP, +${q.money}$` });
+    } else if (kind === 'guard') {
+      if (p.role !== 'guard') { socket.emit('errorMsg', 'Chỉ Quản giáo.'); return; }
+      const q = v6.GUARD_QUESTS.find((x) => x.id === id);
+      if (!q) return;
+      if ((p[q.stat] || 0) < q.target) { socket.emit('errorMsg', 'Chưa hoàn thành.'); return; }
+      if (p.guardQuestClaimed && p.guardQuestClaimed[id]) { socket.emit('errorMsg', 'Đã nhận.'); return; }
+      p.guardQuestClaimed = p.guardQuestClaimed || {};
+      p.guardQuestClaimed[id] = true;
+      p.money += q.money; p.totalEarned += q.money;
+      grantGuardXp(p, q.xp, socket);
+      socket.emit('actionResult', { kind: 'quest', message: `👮 ${q.name}: +${q.xp} XP QG, +${q.money}$` });
+    }
+    emitSelf(socket, p); broadcastState(); saveData();
+  });
+
+  // --- v6 mini-games ---
+  socket.on('quizAnswer', (payload) => {
+    const p = online.get(socket.id);
+    if (!p) return;
+    const m = matches.get(payload && payload.matchId);
+    if (!m || m.game !== 'quiz' || m.status !== 'playing') return;
+    if (!m.players.includes(socket.id)) return;
+    const q = v6.QUIZ_BANK[m.quiz.idx % v6.QUIZ_BANK.length];
+    const ans = payload.answer | 0;
+    const seat = m.players[0] === socket.id ? 1 : 2;
+    if (ans === q.correct) m.scores[seat] = (m.scores[seat] || 0) + 1;
+    m.quiz.asked = (m.quiz.asked || 0) + 1;
+    if (m.vsNpc) {
+      // NPC answers correctly ~55%
+      if (Math.random() < 0.55) m.scores[2] = (m.scores[2] || 0) + 1;
+    }
+    if (m.quiz.asked >= 3) {
+      m.status = 'ended';
+      if (m.scores[1] > (m.scores[2] || 0)) {
+        m.winnerId = m.players[0];
+        const wp = online.get(m.players[0]);
+        const sock = [...io.sockets.sockets.values()].find((s) => s.id === m.players[0]);
+        if (wp) { awardWin(wp, 'quiz', sock); if (sock) emitSelf(sock, wp); m.message = `${wp.nickname} thắng Đố vui!`; }
+      } else if (!m.vsNpc && m.scores[2] > m.scores[1]) {
+        m.winnerId = m.players[1];
+        const wp = online.get(m.players[1]);
+        const sock = [...io.sockets.sockets.values()].find((s) => s.id === m.players[1]);
+        if (wp) { awardWin(wp, 'quiz', sock); if (sock) emitSelf(sock, wp); m.message = `${wp.nickname} thắng Đố vui!`; }
+      } else if (m.vsNpc && (m.scores[2] || 0) >= m.scores[1]) {
+        m.winnerId = 'npc'; m.message = 'Quản giáo thắng Đố vui.';
+      } else {
+        m.message = 'Hòa Đố vui.';
+      }
+      if (m.winnerId && m.winnerId !== 'npc') {
+        const wp = online.get(m.winnerId);
+        if (wp) pushChat({ type: 'system', text: `🧠 ${wp.nickname} thắng Đố vui.`, ts: Date.now() });
+      }
+      broadcastState();
+    } else {
+      m.quiz.idx = (m.quiz.idx + 1 + Math.floor(Math.random() * (v6.QUIZ_BANK.length - 1))) % v6.QUIZ_BANK.length;
+      m.message = `Câu ${m.quiz.asked + 1}/3`;
+    }
+    emitMatch(m);
+  });
+
+  socket.on('ballShoot', (payload) => {
+    const p = online.get(socket.id);
+    if (!p) return;
+    const m = matches.get(payload && payload.matchId);
+    if (!m || m.game !== 'ball' || m.status !== 'playing') return;
+    if (!m.players.includes(socket.id)) return;
+    const power = Math.max(0, Math.min(100, Number(payload.power) || 50));
+    const hit = Math.abs(power - 72) < 18 + Math.random() * 10;
+    const seat = m.players[0] === socket.id ? 1 : 2;
+    if (hit) m.scores[seat] = (m.scores[seat] || 0) + 1;
+    m.ballShots = (m.ballShots || 0) + 1;
+    m.lastRound = { shooter: socket.id, hit, power };
+    if (m.vsNpc && m.ballShots % 2 === 1) {
+      if (Math.random() < 0.48) m.scores[2] = (m.scores[2] || 0) + 1;
+      m.ballShots++;
+    }
+    const shotsNeeded = m.vsNpc ? 6 : 6;
+    if (m.ballShots >= shotsNeeded) {
+      m.status = 'ended';
+      if (m.scores[1] > (m.scores[2] || 0)) {
+        m.winnerId = m.players[0];
+        const wp = online.get(m.players[0]);
+        const sock = [...io.sockets.sockets.values()].find((s) => s.id === m.players[0]);
+        if (wp) { awardWin(wp, 'ball', sock); if (sock) emitSelf(sock, wp); m.message = `${wp.nickname} thắng Ném bóng!`; }
+      } else if (!m.vsNpc && (m.scores[2] || 0) > m.scores[1]) {
+        m.winnerId = m.players[1];
+        const wp = online.get(m.players[1]);
+        const sock = [...io.sockets.sockets.values()].find((s) => s.id === m.players[1]);
+        if (wp) { awardWin(wp, 'ball', sock); if (sock) emitSelf(sock, wp); m.message = `${wp.nickname} thắng Ném bóng!`; }
+      } else if (m.vsNpc && (m.scores[2] || 0) >= m.scores[1]) {
+        m.winnerId = 'npc'; m.message = 'Quản giáo thắng Ném bóng.';
+      } else m.message = 'Hòa bóng rổ.';
+      if (m.winnerId && m.winnerId !== 'npc') {
+        const wp = online.get(m.winnerId);
+        if (wp) pushChat({ type: 'system', text: `🏀 ${wp.nickname} thắng Ném bóng rổ.`, ts: Date.now() });
+      }
+      broadcastState();
+    } else {
+      m.message = hit ? '🏀 Vào rổ!' : '❌ Trượt!';
+    }
+    emitMatch(m);
+  });
+
+  socket.on('oanquanMove', (payload) => {
+    const p = online.get(socket.id);
+    if (!p) return;
+    const m = matches.get(payload && payload.matchId);
+    if (!m || m.game !== 'oanquan' || m.status !== 'playing') return;
+    if (!m.players.includes(socket.id)) return;
+    const seat = m.players[0] === socket.id ? 1 : 2;
+    if (m.board.turn !== seat && !(m.vsNpc && seat === 1)) {
+      // vs npc always seat 1
+    }
+    if (m.vsNpc && seat !== 1) return;
+    if (!m.vsNpc && m.board.turn !== seat) { socket.emit('errorMsg', 'Chưa tới lượt.'); return; }
+    const pit = payload.pit | 0;
+    const pits = m.board.pits;
+    const mySide = seat === 1 ? [0,1,2,3,4] : [6,7,8,9,10];
+    if (!mySide.includes(pit) || !pits[pit]) return;
+    let stones = pits[pit]; pits[pit] = 0;
+    let i = pit;
+    while (stones > 0) {
+      i = (i + 1) % 12;
+      if (i === 5 || i === 11) continue; // skip quan for lite
+      pits[i]++; stones--;
+    }
+    // capture lite: if land on empty own side, steal
+    if (mySide.includes(i) && pits[i] === 1) {
+      const opp = (i + 6) % 12;
+      if (opp !== 5 && opp !== 11) {
+        pits[seat === 1 ? 5 : 11] += pits[opp] + 1;
+        pits[opp] = 0; pits[i] = 0;
+      }
+    }
+    // NPC simple move
+    if (m.vsNpc) {
+      const npcSide = [6,7,8,9,10];
+      const choices = npcSide.filter((x) => pits[x] > 0);
+      if (choices.length) {
+        const np = choices[Math.floor(Math.random() * choices.length)];
+        let ns = pits[np]; pits[np] = 0; let j = np;
+        while (ns > 0) { j = (j + 1) % 12; if (j === 5 || j === 11) continue; pits[j]++; ns--; }
+      }
+      m.board.turn = 1;
+    } else {
+      m.board.turn = seat === 1 ? 2 : 1;
+    }
+    const myScore = pits[5] + mySide.reduce((s, x) => s + pits[x], 0);
+    const oppScore = pits[11] + [6,7,8,9,10].reduce((s, x) => s + pits[x], 0);
+    const left1 = mySide.reduce((s, x) => s + pits[x], 0);
+    const left2 = [6,7,8,9,10].reduce((s, x) => s + pits[x], 0);
+    if (left1 === 0 || left2 === 0 || (pits[5] + pits[11]) >= 40) {
+      m.status = 'ended';
+      const s1 = pits[5]; const s2 = pits[11];
+      if (s1 > s2) {
+        m.winnerId = m.players[0];
+        const wp = online.get(m.players[0]);
+        const sock = [...io.sockets.sockets.values()].find((s) => s.id === m.players[0]);
+        if (wp) { awardWin(wp, 'oanquan', sock); if (sock) emitSelf(sock, wp); m.message = `${wp.nickname} thắng Ô ăn quan!`; }
+      } else if (!m.vsNpc && s2 > s1) {
+        m.winnerId = m.players[1];
+        const wp = online.get(m.players[1]);
+        const sock = [...io.sockets.sockets.values()].find((s) => s.id === m.players[1]);
+        if (wp) { awardWin(wp, 'oanquan', sock); if (sock) emitSelf(sock, wp); m.message = `${wp.nickname} thắng Ô ăn quan!`; }
+      } else if (m.vsNpc && s2 >= s1) {
+        m.winnerId = 'npc'; m.message = 'Quản giáo thắng Ô ăn quan.';
+      } else m.message = 'Hòa Ô ăn quan.';
+      if (m.winnerId && m.winnerId !== 'npc') {
+        const wp = online.get(m.winnerId);
+        if (wp) pushChat({ type: 'system', text: `🟡 ${wp.nickname} thắng Ô ăn quan.`, ts: Date.now() });
+      }
+      broadcastState();
+    } else {
+      m.message = `Ô quan: bạn ${pits[5]} — đối ${pits[11]}`;
+    }
+    emitMatch(m);
+  });
+
+  socket.on('tienlenPlay', (payload) => {
+    const p = online.get(socket.id);
+    if (!p) return;
+    const m = matches.get(payload && payload.matchId);
+    if (!m || m.game !== 'tienlen' || m.status !== 'playing') return;
+    if (!m.players.includes(socket.id)) return;
+    const play = Math.max(2, Math.min(14, Number(payload.card) || m.hand || 7));
+    let npc = m.npcHand || (Math.floor(Math.random() * 13) + 2);
+    if (!m.vsNpc && m.hands) {
+      const oppId = m.players.find((id) => id !== socket.id);
+      npc = m.hands[oppId] || npc;
+      m.hands[socket.id] = play;
+    }
+    m.lastRound = { you: play, opp: npc };
+    m.status = 'ended';
+    if (play > npc) {
+      m.winnerId = socket.id;
+      awardWin(p, 'tienlen', socket); emitSelf(socket, p);
+      m.message = `${p.nickname} thắng Tiến lên lite (${play} > ${npc})!`;
+      pushChat({ type: 'system', text: `🃏 ${p.nickname} thắng Tiến lên lite.`, ts: Date.now() });
+    } else if (play < npc) {
+      m.winnerId = m.vsNpc ? 'npc' : (m.players.find((id) => id !== socket.id) || 'npc');
+      if (!m.vsNpc && m.winnerId !== 'npc') {
+        const wp = online.get(m.winnerId);
+        const sock = [...io.sockets.sockets.values()].find((s) => s.id === m.winnerId);
+        if (wp) { awardWin(wp, 'tienlen', sock); if (sock) emitSelf(sock, wp); m.message = `${wp.nickname} thắng Tiến lên lite!`; }
+      } else m.message = `Thua Tiến lên (${play} < ${npc}).`;
+    } else {
+      m.message = 'Hòa bài.';
+    }
+    broadcastState();
+    emitMatch(m);
+  });
+
+  // --- v6 guard actions ---
+  socket.on('guardPatrol', () => {
+    const p = online.get(socket.id);
+    if (!p || p.role !== 'guard') { socket.emit('errorMsg', 'Chỉ Quản giáo tuần tra.'); return; }
+    if (p.energy < 8) { socket.emit('errorMsg', 'Hết năng lượng tuần tra.'); return; }
+    p.energy -= 8;
+    p.guardPatrols = (p.guardPatrols || 0) + 1;
+    grantGuardXp(p, 6, socket);
+    p.money += 8; p.totalEarned += 8;
+    // move along a few rooms
+    const route = ['san_tap', 'xuong', 'tuong_rao', 'nha_bep', 'bang_thu'];
+    p.room = route[p.guardPatrols % route.length];
+    const r = ROOM_BY_ID[p.room];
+    if (r) { p.x = r.x; p.z = r.z; }
+    setEmote(p, 'patrol', 4000);
+    socket.emit('actionResult', { kind: 'patrol', message: `🪖 Tuần tra ${p.room}. +6 XP QG` });
+    pushChat({ type: 'system', text: `🪖 Quản giáo ${p.nickname} tuần tra khu ${ROOM_BY_ID[p.room]?.name || p.room}.`, ts: Date.now() });
+    emitSelf(socket, p); broadcastState(); saveData();
+  });
+
+  socket.on('guardRollCall', () => {
+    const p = online.get(socket.id);
+    if (!p || p.role !== 'guard') { socket.emit('errorMsg', 'Chỉ Quản giáo điểm danh.'); return; }
+    p.guardRolls = (p.guardRolls || 0) + 1;
+    grantGuardXp(p, 10, socket);
+    p.money += 12; p.totalEarned += 12;
+    const phase = SCHEDULE[scheduleIndex];
+    let missing = 0;
+    for (const pl of online.values()) {
+      if (pl.role === 'guard' || pl.escaped || pl.released) continue;
+      if (!v6.inRequiredPlace(phase, pl)) missing++;
+    }
+    const msg = `📋 Điểm danh: ${online.size} online, ${missing} vắng vị trí lịch (${phase.name}).`;
+    socket.emit('actionResult', { kind: 'roll', message: msg });
+    pushChat({ type: 'system', text: `📋 Quản giáo ${p.nickname} điểm danh — ${missing} người chưa đúng chỗ.`, ts: Date.now() });
+    emitSelf(socket, p); broadcastState(); saveData();
+  });
+
+  socket.on('guardCatch', (payload) => {
+    const p = online.get(socket.id);
+    if (!p || p.role !== 'guard') { socket.emit('errorMsg', 'Chỉ Quản giáo bắt vượt ngục.'); return; }
+    const targetId = payload && payload.targetId;
+    let target = targetId ? online.get(targetId) : null;
+    if (!target) {
+      // find prisoner at tuong_rao
+      target = [...online.values()].find((pl) => pl.role !== 'guard' && !pl.released && pl.room === 'tuong_rao');
+    }
+    if (!target) { socket.emit('errorMsg', 'Không có tù nhân khả nghi tại tường rào.'); return; }
+    if (target.room !== 'tuong_rao' && target.room !== p.room) {
+      socket.emit('errorMsg', 'Đối tượng không ở gần.'); return;
+    }
+    const bonus = v6.guardRankFromXp(p.guardXp || 0).catchBonus || 0;
+    const chance = 0.55 + bonus;
+    if (Math.random() < chance) {
+      p.guardCatches = (p.guardCatches || 0) + 1;
+      grantGuardXp(p, 35, socket);
+      p.money += 50; p.totalEarned += 50;
+      const tSock = [...io.sockets.sockets.values()].find((s) => s.id === target.id);
+      failEscapeCatch(target, tSock, `Quản giáo ${p.nickname} bắt quả tang khi vượt ngục!`);
+      socket.emit('actionResult', { kind: 'catch', message: `🚨 Bắt được ${target.nickname}! +35 XP QG, +50$` });
+      pushChat({ type: 'system', text: `🚨 Quản giáo ${p.nickname} bắt ${target.nickname} vượt ngục!`, ts: Date.now() });
+    } else {
+      grantGuardXp(p, 5, socket);
+      socket.emit('actionResult', { kind: 'catch', message: `${target.nickname} chạy thoát tạm thời.` });
+    }
+    emitSelf(socket, p); broadcastState(); saveData();
+  });
+
+  socket.on('guardBribeOffer', (payload) => {
+    // prisoner offers bribe to player-guard
+    const p = online.get(socket.id);
+    if (!p || p.role === 'guard') return;
+    if (p.escaped || p.released) return;
+    const guardId = payload && payload.guardId;
+    const g = online.get(guardId);
+    if (!g || g.role !== 'guard') { socket.emit('errorMsg', 'Không tìm thấy Quản giáo người chơi.'); return; }
+    const price = Math.max(30, bribePrice(p));
+    if (p.money < price) { socket.emit('errorMsg', `Cần ${price}$ để hối lộ.`); return; }
+    g.pendingBribes = g.pendingBribes || [];
+    g.pendingBribes.push({ fromId: socket.id, fromNick: p.nickname, amount: price, ts: Date.now() });
+    if (g.pendingBribes.length > 10) g.pendingBribes.shift();
+    const gSock = [...io.sockets.sockets.values()].find((s) => s.id === g.id);
+    if (gSock) {
+      gSock.emit('bribeOffer', { fromId: socket.id, fromNick: p.nickname, amount: price });
+      emitSelf(gSock, g);
+    }
+    socket.emit('actionResult', { kind: 'bribe', message: `Đã gửi hối lộ ${price}$ tới Quản giáo ${g.nickname}.` });
+  });
+
+  socket.on('guardRespondBribe', (payload) => {
+    const p = online.get(socket.id);
+    if (!p || p.role !== 'guard') return;
+    const fromId = payload && payload.fromId;
+    const accept = !!(payload && payload.accept);
+    const offer = (p.pendingBribes || []).find((b) => b.fromId === fromId);
+    if (!offer) { socket.emit('errorMsg', 'Không còn đề nghị hối lộ.'); return; }
+    p.pendingBribes = (p.pendingBribes || []).filter((b) => b.fromId !== fromId);
+    const prisoner = online.get(fromId);
+    const pSock = [...io.sockets.sockets.values()].find((s) => s.id === fromId);
+    if (accept) {
+      if (!prisoner || prisoner.money < offer.amount) {
+        socket.emit('errorMsg', 'Tù nhân không đủ tiền.'); return;
+      }
+      prisoner.money -= offer.amount;
+      p.money += offer.amount; p.totalEarned += offer.amount;
+      prisoner.bribeGuardId = 'player_' + p.id;
+      prisoner.bribeUntil = Date.now() + 90000;
+      grantGuardXp(p, 3, socket);
+      if (pSock) {
+        emitSelf(pSock, prisoner);
+        pSock.emit('actionResult', { kind: 'bribe', message: `Quản giáo ${p.nickname} nhận hối lộ — canh lỏng 90s.` });
+      }
+      socket.emit('actionResult', { kind: 'bribe', message: `Nhận ${offer.amount}$ từ ${offer.fromNick}.` });
+      pushChat({ type: 'system', text: `💰 Quản giáo ${p.nickname}… “linh động” với ${offer.fromNick}.`, ts: Date.now() });
+    } else {
+      p.guardRefuseBribes = (p.guardRefuseBribes || 0) + 1;
+      p.guardIntegrity = (p.guardIntegrity || 0) + 10;
+      grantGuardXp(p, 12, socket);
+      p.rehabPoints = (p.rehabPoints || 0); // N/A
+      if (pSock) pSock.emit('actionResult', { kind: 'bribe', message: `Quản giáo ${p.nickname} từ chối hối lộ!` });
+      socket.emit('actionResult', { kind: 'bribe', message: `Từ chối hối lộ — +10 liêm chính, +12 XP QG` });
+      pushChat({ type: 'system', text: `✨ Quản giáo ${p.nickname} từ chối hối lộ của ${offer.fromNick} — điểm liêm chính +10.`, ts: Date.now() });
+    }
+    emitSelf(socket, p); broadcastState(); saveData();
   });
 
   socket.on('disconnect', () => {

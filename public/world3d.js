@@ -66,6 +66,8 @@
     let bodyMat;
     if (isOrange) {
       bodyMat = mat(0xff7a1a);
+    } else if (stripeId === 'police') {
+      bodyMat = new THREE.MeshLambertMaterial({ map: stripeTexture('#2a4a7a', '#0d1b2a') });
     } else {
       const map = stripeId === 'blue'
         ? stripeTexture('#e8f0ff', '#1a3050')

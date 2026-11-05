@@ -33,7 +33,7 @@
     <div class="panel-card join-card login-card">
       <div class="lotus-ish" aria-hidden="true">⛓️</div>
       <h1 id="join-h">Ở tù online</h1>
-      <p class="sub">Trại chibi 3D · Cải tạo · Caro · Kéo Búa Bao</p>
+      <p class="sub">Trại chibi 3D · Nhiệm vụ · Mini-game · Quản giáo</p>
       <label class="lbl" for="fullName">Họ và tên</label>
       <input id="fullName" maxlength="40" autocomplete="name" placeholder="VD: Nguyễn Văn Sọc" />
       <label class="lbl" for="nick">Biệt danh trong trại</label>
@@ -86,6 +86,8 @@
     <div class="info-line" id="info-room">🚪 Phòng của bạn: —</div>
     <div class="info-line accent" id="info-sentence">⚖️ Còn — ngày · 🏅 Kém</div>
     <div class="info-line" id="info-rank">🐣 Hạng: Tù mới · 0 XP</div>
+    <div class="info-line" id="info-cell">🚪 Phòng giam: —</div>
+    <div class="info-line" id="info-guard" hidden>👮 Quản giáo: —</div>
   </aside>
 
   <!-- Top-right tools -->
@@ -131,6 +133,8 @@
   <!-- Right vertical menu -->
   <nav class="right-menu" id="right-menu" hidden>
     <button type="button" data-open="games"><span>🎮</span> Trò chơi</button>
+    <button type="button" data-open="quests"><span>📜</span> Nhiệm vụ</button>
+    <button type="button" data-open="guard"><span>👮</span> Quản giáo</button>
     <button type="button" data-open="board"><span>🏆</span> BXH</button>
     <button type="button" data-open="achievements"><span>🏅</span> Vinh danh</button>
     <button type="button" data-open="profile"><span>🪪</span> Khoe</button>
@@ -155,9 +159,11 @@
         <li><b>Di chuyển:</b> WASD / phím mũi tên, chạm sàn, hoặc joystick trên điện thoại.</li>
         <li><b>Camera:</b> Kéo chuột / chạm-kéo để xoay · lăn chuột để zoom.</li>
         <li><b>Sinh hoạt:</b> Ngồi (căn tin), hít đất, vẫy tay, gạch ngày, viết thư, về phòng ngủ.</li>
-        <li><b>Trò chơi:</b> Caro &amp; Kéo Búa Bao với NPC hoặc người chơi (tên xanh).</li>
-        <li><b>Cải tạo:</b> Làm việc, đúng lịch loa trại, thắng game, viết thư → điểm cải tạo → giảm án.</li>
-        <li><b>Vượt ngục:</b> phải <b>hối lộ cán bộ</b> (tiền trong game) để họ quay đi ~28s; không hối lộ gần như chắc bị bắt. Thất bại = +15 ngày án.</li>
+        <li><b>Trò chơi:</b> Caro, Kéo Búa Bao, Đố vui, Ném bóng, Ô ăn quan, Tiến lên lite vs NPC hoặc người chơi.</li>
+        <li><b>Nhiệm vụ:</b> daily + nhiệm vụ lên cấp — nhận XP/tiền khi hoàn thành.</li>
+        <li><b>Lịch bắt buộc:</b> giờ ngủ về đúng phòng giam; giờ lao động ra xưởng; giờ ăn vào nhà ăn. Cảnh báo rồi trừ điểm nếu vắng.</li>
+        <li><b>Vượt ngục:</b> hối lộ rồi leo tường. Thành công → trở thành <b>Quản giáo</b>. Thất bại → mất hết điểm, án tính lại từ đầu.</li>
+        <li><b>Quản giáo:</b> tuần tra, điểm danh, bắt vượt ngục, nhận/từ chối hối lộ (từ chối = điểm liêm chính).</li>
         <li><b>Âm thanh:</b> nhạc nền / SFX (nút góc phải). Trên điện thoại cần chạm 1 lần để bật loa.</li>
         <li><b>Mãn hạn</b> = lễ ra tù + BXH ra tù sớm.</li>
       </ul>
