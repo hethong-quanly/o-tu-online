@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Ở tù online</title>
+  <link rel="stylesheet" href="/style.css" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;600;700&family=Share+Tech+Mono&display=swap" rel="stylesheet" />
+</head>
+<body>
+  <div id="join-screen" class="screen">
+    <div class="card join-card">
+      <div class="bars">||||</div>
+      <h1>Ở TÙ ONLINE</h1>
+      <p class="tagline">Mô phỏng đời sống trong tù · Nhiều người chơi</p>
+      <label for="nick">Biệt danh tù nhân</label>
+      <input id="nick" maxlength="16" placeholder="VD: Tí Sắt" autocomplete="off" />
+      <button id="btn-join" class="btn primary">Vào trại</button>
+      <p id="join-error" class="error"></p>
+      <p class="hint">Làm việc → kiếm tiền → nâng cấp → vượt ngục</p>
+    </div>
+  </div>
+
+  <div id="game-screen" class="screen hidden">
+    <header class="topbar">
+      <div class="brand">⛓️ Ở tù online</div>
+      <div class="online" id="online-count">0 online</div>
+      <div class="nick-badge" id="my-nick">—</div>
+    </header>
+
+    <main class="layout">
+      <aside class="panel stats-panel">
+        <h2>Trạng thái</h2>
+        <div class="stat"><span>💰 Tiền</span><strong id="stat-money">0</strong></div>
+        <div class="bar-wrap">
+          <div class="bar-label"><span>❤️ Sức khỏe</span><span id="stat-health-txt">100/100</span></div>
+          <div class="bar"><i id="bar-health" style="width:100%"></i></div>
+        </div>
+        <div class="bar-wrap">
+          <div class="bar-label"><span>⚡ Năng lượng</span><span id="stat-energy-txt">100/100</span></div>
+          <div class="bar energy"><i id="bar-energy" style="width:100%"></i></div>
+        </div>
+        <div class="stat"><span>⭐ Uy tín</span><strong id="stat-rep">0</strong></div>
+        <div class="stat"><span>🔑 Dụng cụ vượt</span><strong id="stat-tool">0</strong></div>
+        <div class="stat"><span>❌ Lần vượt hỏng</span><strong id="stat-fails">0</strong></div>
+        <p id="toast" class="toast"></p>
+      </aside>
+
+      <section class="panel map-panel">
+        <h2>Bản đồ trại</h2>
+        <div id="rooms" class="rooms"></div>
+        <p class="hint small">Click phòng để di chuyển (−3 năng lượng). Vượt ngục tại <strong>Tường rào</strong>.</p>
+        <div class="players-here">
+          <h3>Người trong phòng</h3>
+          <ul id="players-list"></ul>
+        </div>
+      </section>
+
+      <section class="panel action-panel">
+        <div class="tabs">
+          <button class="tab active" data-tab="jobs">Làm việc</button>
+          <button class="tab" data-tab="shop">Cửa hàng</button>
+          <button class="tab" data-tab="escape">Vượt ngục</button>
+          <button class="tab" data-tab="board">BXH</button>
+        </div>
+        <div id="tab-jobs" class="tab-body"></div>
+        <div id="tab-shop" class="tab-body hidden"></div>
+        <div id="tab-escape" class="tab-body hidden">
+          <div class="escape-box">
+            <p>Đến <strong>Tường rào</strong>, tích lũy dụng cụ & uy tín rồi thử vượt.</p>
+            <ul class="escape-tips">
+              <li>Cơ bản 8% + 12%/cấp dụng cụ vượt</li>
+              <li>+ uy tín & máu · − mỗi lần thất bại</li>
+              <li>Thất bại: −25 máu, −30 tiền, về Phòng A</li>
+            </ul>
+            <button id="btn-escape" class="btn danger">🏃 Thử vượt ngục</button>
+            <p id="escape-msg" class="escape-msg"></p>
+          </div>
+        </div>
+        <div id="tab-board" class="tab-body hidden">
+          <ol id="leaderboard" class="leaderboard"></ol>
+        </div>
+      </section>
+
+      <aside class="panel chat-panel">
+        <h2>Chat toàn trại</h2>
+        <div id="chat-log" class="chat-log"></div>
+        <form id="chat-form" class="chat-form">
+          <input id="chat-input" maxlength="200" placeholder="Nói gì đó…" autocomplete="off" />
+          <button class="btn">Gửi</button>
+        </form>
+      </aside>
+    </main>
+  </div>
+
+  <div id="escape-overlay" class="overlay hidden">
+    <div class="card">
+      <h2 id="escape-title">—</h2>
+      <p id="escape-detail"></p>
+      <button id="btn-replay" class="btn primary">Chơi lại (đời mới)</button>
+    </div>
+  </div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="/client.js"></script>
+</body>
+</html>
