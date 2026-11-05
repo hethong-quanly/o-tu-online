@@ -221,5 +221,63 @@
     setTimeout(() => this._noise(0.15, 0.1, this.sfxGain, 1200), 280);
   };
 
+  OtuAudio.prototype.sing = function () {
+    if (!this.sfxOn || !this.ensure()) return;
+    this.resume();
+    const notes = [392, 440, 494, 523, 587, 523];
+    notes.forEach((f, i) => setTimeout(() => this._tone(f, 0.18, 'sine', 0.2, this.sfxGain), i * 160));
+  };
+
+  OtuAudio.prototype.dance = function () {
+    if (!this.sfxOn || !this.ensure()) return;
+    this.resume();
+    for (let i = 0; i < 4; i++) {
+      setTimeout(() => {
+        this._noise(0.06, 0.18, this.sfxGain, 180);
+        this._tone(220 + i * 40, 0.08, 'square', 0.12, this.sfxGain);
+      }, i * 200);
+    }
+  };
+
+  OtuAudio.prototype.story = function () {
+    if (!this.sfxOn || !this.ensure()) return;
+    this.resume();
+    this._tone(280, 0.15, 'triangle', 0.14, this.sfxGain);
+    setTimeout(() => this._tone(320, 0.2, 'triangle', 0.12, this.sfxGain), 180);
+    setTimeout(() => this._tone(260, 0.22, 'sine', 0.12, this.sfxGain), 360);
+  };
+
+  OtuAudio.prototype.martial = function () {
+    if (!this.sfxOn || !this.ensure()) return;
+    this.resume();
+    this._noise(0.08, 0.22, this.sfxGain, 600);
+    setTimeout(() => this._tone(180, 0.1, 'sawtooth', 0.18, this.sfxGain, 90), 60);
+    setTimeout(() => this._noise(0.1, 0.2, this.sfxGain, 400), 180);
+  };
+
+  OtuAudio.prototype.cheer = function () {
+    if (!this.sfxOn || !this.ensure()) return;
+    this.resume();
+    this._noise(0.2, 0.22, this.sfxGain, 1500);
+    this._tone(660, 0.08, 'triangle', 0.14, this.sfxGain);
+    setTimeout(() => this._tone(880, 0.1, 'triangle', 0.12, this.sfxGain), 90);
+  };
+
+  OtuAudio.prototype.rhythmHit = function (perfect) {
+    if (!this.sfxOn || !this.ensure()) return;
+    this.resume();
+    if (perfect) this._tone(880, 0.06, 'sine', 0.22, this.sfxGain);
+    else this._tone(520, 0.05, 'triangle', 0.14, this.sfxGain);
+  };
+
+  OtuAudio.prototype.perform = function (kind) {
+    if (kind === 'sing') this.sing();
+    else if (kind === 'dance') this.dance();
+    else if (kind === 'story') this.story();
+    else if (kind === 'martial') this.martial();
+    else if (kind === 'pushup_show' || kind === 'pushup') this.pushup();
+    else this.click();
+  };
+
   global.OtuAudio = OtuAudio;
 })(typeof window !== 'undefined' ? window : globalThis);

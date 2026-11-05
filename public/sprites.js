@@ -8,7 +8,7 @@
   const STRIPES = {
     bw: { light: '#f5f5f5', dark: '#151515', mode: 'vstripe' },
     blue: { light: '#e8f0ff', dark: '#1a4060', mode: 'vstripe' },
-    orange: { light: '#ff8a2a', dark: '#e06010', mode: 'solid' },
+    orange: { light: '#FF6A00', dark: '#E05500', mode: 'solid' },
     brown: { light: '#8b5a2b', dark: '#5a3a1a', mode: 'solid' },
     police: { light: '#2f5a32', dark: '#1a3018', mode: 'solid' },
   };

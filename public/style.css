@@ -495,3 +495,46 @@ body.mobile-chrome #joystick { z-index: 31; }
     visibility: visible !important; transform: none !important;
   }
 }
+
+/* —— v11 auth tabs + perform rhythm —— */
+.auth-tabs {
+  display: flex; gap: 6px; margin: 8px 0 14px;
+  background: rgba(0,0,0,.25); border-radius: 12px; padding: 4px;
+}
+.auth-tab {
+  flex: 1; border: 0; background: transparent; color: var(--dim, #b8b8c8);
+  font: inherit; font-weight: 700; padding: 10px 8px; border-radius: 10px; cursor: pointer;
+}
+.auth-tab.on { background: var(--pri, #3d7eff); color: #fff; }
+.auth-pane label.lbl { margin-top: 8px; }
+.auth-pane input[type="password"] {
+  width: 100%; box-sizing: border-box; padding: 10px 12px; border-radius: 10px;
+  border: 1px solid var(--line, #333); background: rgba(0,0,0,.35); color: inherit; font: inherit;
+}
+.perform-kinds { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 12px 0; }
+.perform-kinds button {
+  display: flex; flex-direction: column; align-items: center; gap: 4px;
+  padding: 12px 8px; border-radius: 12px; border: 1px solid var(--line,#444);
+  background: rgba(255,255,255,.06); color: inherit; font: inherit; cursor: pointer;
+}
+.perform-kinds button span { font-size: 28px; }
+.perform-kinds button:active { transform: scale(.97); }
+.rhythm-card { max-width: 360px; text-align: center; }
+.rhythm-track {
+  position: relative; height: 64px; margin: 16px 0; border-radius: 12px;
+  background: rgba(0,0,0,.35); overflow: hidden; border: 1px solid var(--line,#444);
+}
+.rhythm-hitline {
+  position: absolute; left: 50%; top: 0; bottom: 0; width: 3px;
+  background: #ffcc33; transform: translateX(-50%); box-shadow: 0 0 12px #ffcc33;
+}
+.rhythm-note {
+  position: absolute; top: 12px; width: 40px; height: 40px; margin-left: -20px;
+  border-radius: 50%; background: #3d7eff; color: #fff; font-weight: 800;
+  display: flex; align-items: center; justify-content: center;
+  transition: left linear;
+}
+.rhythm-note.ok { background: #2ecc71; }
+.rhythm-note.miss { background: #e74c3c; opacity: .5; }
+#rhythm-tap { width: 100%; min-height: 64px; font-size: 22px; letter-spacing: .04em; }
+#mob-cheer { background: #2a6a3a; }

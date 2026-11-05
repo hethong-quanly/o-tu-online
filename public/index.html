@@ -27,6 +27,8 @@
   <div class="mob-actions" id="mob-actions" hidden>
     <button type="button" class="mob-btn" id="mob-wave" title="Vẫy">👋</button>
     <button type="button" class="mob-btn" id="mob-sit" title="Ngồi">🪑</button>
+    <button type="button" class="mob-btn" id="mob-perform" title="Biểu diễn">🎭</button>
+    <button type="button" class="mob-btn" id="mob-cheer" title="Cổ vũ" hidden>👏</button>
   </div>
 
   <!-- Compact always-on HUD (mobile) + chrome toggle FABs -->
@@ -48,7 +50,33 @@
     <div class="panel-card join-card login-card">
       <div class="lotus-ish" aria-hidden="true">⛓️</div>
       <h1 id="join-h">Ở tù online</h1>
-      <p class="sub">Trại 3D v10 · Chibi · Đồng phục quốc gia · Nam/Nữ/LGBT · Quản giáo</p>
+      <p class="sub">Trại 3D v11 · Biểu diễn · Đăng nhập · Chibi · Đồng phục</p>
+      <div class="auth-tabs" role="tablist">
+        <button type="button" class="auth-tab on" data-auth="login" id="tab-login">Đăng nhập</button>
+        <button type="button" class="auth-tab" data-auth="register" id="tab-register">Tạo nhân vật mới</button>
+      </div>
+
+      <div id="auth-login" class="auth-pane">
+        <label class="lbl" for="login-nick">Biệt danh</label>
+        <input id="login-nick" maxlength="16" autocomplete="username" placeholder="VD: Tí Sắt" />
+        <label class="lbl" for="login-pass">Mật khẩu</label>
+        <input id="login-pass" type="password" maxlength="72" autocomplete="current-password" placeholder="••••••••" />
+        <button id="btn-login" class="btn pri big" type="button">Đăng nhập</button>
+        <p class="meta" style="margin-top:8px;font-size:12px;opacity:.85">Thiết bị đã lưu phiên sẽ tự vào trại.</p>
+      </div>
+
+      <div id="auth-claim" class="auth-pane" hidden>
+        <p class="ghi" id="claim-msg">Tài khoản cũ chưa có mật khẩu. Đặt mật khẩu để bảo vệ tiến trình.</p>
+        <label class="lbl" for="claim-nick">Biệt danh</label>
+        <input id="claim-nick" maxlength="16" readonly />
+        <label class="lbl" for="claim-pass">Mật khẩu mới</label>
+        <input id="claim-pass" type="password" maxlength="72" autocomplete="new-password" placeholder="Ít nhất 6 ký tự" />
+        <label class="lbl" for="claim-pass2">Nhập lại mật khẩu</label>
+        <input id="claim-pass2" type="password" maxlength="72" autocomplete="new-password" />
+        <button id="btn-claim" class="btn pri big" type="button">Đặt mật khẩu &amp; vào trại</button>
+      </div>
+
+      <div id="auth-register" class="auth-pane" hidden>
       <label class="lbl" for="fullName">Họ và tên</label>
       <input id="fullName" maxlength="40" autocomplete="name" placeholder="VD: Nguyễn Văn Sọc" />
       <label class="lbl" for="nick">Biệt danh trong trại</label>
@@ -101,8 +129,13 @@
           <div class="pcard-row"><span>Xếp loại</span><b id="pv-rate">Kém</b></div>
         </div>
       </div>
+      <label class="lbl" for="reg-pass">Mật khẩu</label>
+      <input id="reg-pass" type="password" maxlength="72" autocomplete="new-password" placeholder="Ít nhất 6 ký tự" />
+      <label class="lbl" for="reg-pass2">Nhập lại mật khẩu</label>
+      <input id="reg-pass2" type="password" maxlength="72" autocomplete="new-password" />
       <p class="ghi">Làm thành tích để được đánh giá tốt &amp; giảm án. Tối đa 10.000 tù nhân.</p>
-      <button id="btn-join" class="btn pri big" type="button">Nhập trại</button>
+      <button id="btn-join" class="btn pri big" type="button">Tạo nhân vật &amp; nhập trại</button>
+      </div>
       <p id="join-error" class="error" role="alert"></p>
     </div>
   </section>
@@ -172,6 +205,7 @@
     <button type="button" id="dock-talk"><span>💬</span><small>Nói chuyện</small></button>
     <button type="button" id="dock-map"><span>🗺️</span><small>Bản đồ</small></button>
     <button type="button" data-act="pushup"><span>🏋️</span><small>Hít đất</small></button>
+    <button type="button" id="dock-perform"><span>🎭</span><small>Biểu diễn</small></button>
     <button type="button" data-act="letter"><span>✉️</span><small>Viết thư</small></button>
     <button type="button" data-act="mark_day"><span>✏️</span><small>Gạch</small></button>
     <button type="button" id="dock-chat"><span>💬</span><small>Chat</small></button>
@@ -200,6 +234,23 @@
   <div class="toast" id="toast" role="status"></div>
   <div id="invite-toast" class="invite-toast" hidden></div>
 
+  <div id="perform-pick" class="overlay-panel" hidden>
+    <div class="panel-card" style="max-width:420px">
+      <h2>🎭 Biểu diễn</h2>
+      <p class="meta">Hát, múa, hít đất, kể chuyện, võ thuật — nhịp điệu tốt = điểm tích cực. Sân khấu căn tin / sân chơi thưởng thêm.</p>
+      <div id="perform-kinds" class="perform-kinds"></div>
+      <button type="button" class="btn" id="perform-pick-x">Đóng</button>
+    </div>
+  </div>
+  <div id="perform-rhythm" class="overlay-panel" hidden>
+    <div class="panel-card rhythm-card">
+      <h2 id="rhythm-title">🎤 Ca hát</h2>
+      <p class="meta" id="rhythm-hint">Chạm theo nhịp!</p>
+      <div class="rhythm-track" id="rhythm-track"><div class="rhythm-hitline"></div></div>
+      <button type="button" class="btn pri big" id="rhythm-tap">CHẠM</button>
+      <div class="meta" id="rhythm-score">0 / 0</div>
+    </div>
+  </div>
   <div id="help-modal" class="overlay-panel" hidden>
     <div class="panel-card help-card">
       <h2>Hướng dẫn</h2>

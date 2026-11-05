@@ -126,7 +126,7 @@ import { createChibiCharacter } from './chibi.js';
     const isBrown = stripeId === 'brown';
     const isBlue = stripeId === 'blue' || stripeId === 'blue_white';
     // Vertical body stripes → bands vary in X
-    const light = isPolice ? '#2f5a32' : (isBlue ? '#e8f0ff' : (isOrange ? '#ff8a2a' : (isBrown ? '#8b5a2b' : '#f5f5f5')));
+    const light = isPolice ? '#2f5a32' : (isBlue ? '#e8f0ff' : (isOrange ? '#FF6A00' : (isBrown ? '#8b5a2b' : '#f5f5f5')));
     const dark = isPolice ? '#1a3018' : (isBlue ? '#1a4060' : (isOrange ? '#e06010' : (isBrown ? '#5a3a1a' : '#151515')));
     return makeCanvasTex((ctx, w, h) => {
       if (isOrange || isBrown || isPolice) {
@@ -340,6 +340,7 @@ import { createChibiCharacter } from './chibi.js';
     if (g.userData.gltf && g.userData.mixer) {
       let anim = 'idle';
       if (emote === 'pushup') anim = 'pushup';
+      else if (emote === 'sing' || emote === 'dance' || emote === 'story' || emote === 'martial') anim = emote;
       else if (emote === 'sit' || emote === 'sleep') anim = emote === 'sleep' ? 'sleep' : 'sit';
       else if (emote === 'wave') anim = 'wave';
       else if (emote === 'work' || emote === 'sew' || emote === 'hammer') anim = emote === 'sew' ? 'sew' : (emote === 'hammer' ? 'hammer' : 'work');
@@ -354,6 +355,7 @@ import { createChibiCharacter } from './chibi.js';
     const t = g.userData.animT;
     let anim = 'idle';
     if (emote === 'pushup') anim = 'pushup';
+    else if (emote === 'sing' || emote === 'dance' || emote === 'story' || emote === 'martial') anim = emote;
     else if (emote === 'sit' || emote === 'sleep') anim = emote;
     else if (emote === 'wave') anim = 'wave';
     else if (emote === 'work' || emote === 'sew' || emote === 'hammer') anim = emote;
@@ -406,6 +408,34 @@ import { createChibiCharacter } from './chibi.js';
       L.armL.rotation.x = -0.9;
       L.armR.rotation.x = -0.9 + Math.sin(t * 10) * 0.15;
       L.head.rotation.x = 0.25;
+    } else if (anim === 'sing') {
+      L.armR.rotation.x = -1.4;
+      L.armR.rotation.z = -0.3;
+      L.armL.rotation.z = 0.4 + Math.sin(t * 4) * 0.15;
+      L.head.rotation.x = -0.15 + Math.sin(t * 5) * 0.08;
+      L.hips.position.y = Math.sin(t * 3) * 0.03;
+      L.torso.rotation.y = Math.sin(t * 2.5) * 0.12;
+    } else if (anim === 'dance') {
+      L.armL.rotation.z = 1.2 + Math.sin(t * 6) * 0.5;
+      L.armR.rotation.z = -1.2 - Math.sin(t * 6 + 1) * 0.5;
+      L.armL.rotation.x = Math.sin(t * 6) * 0.4;
+      L.armR.rotation.x = Math.sin(t * 6 + Math.PI) * 0.4;
+      L.legL.rotation.x = Math.sin(t * 6) * 0.35;
+      L.legR.rotation.x = Math.sin(t * 6 + Math.PI) * 0.35;
+      L.hips.position.y = Math.abs(Math.sin(t * 6)) * 0.1;
+      L.torso.rotation.y = Math.sin(t * 3) * 0.25;
+    } else if (anim === 'story') {
+      L.armR.rotation.x = -0.6 + Math.sin(t * 3) * 0.35;
+      L.armL.rotation.x = -0.3 + Math.sin(t * 2.5 + 1) * 0.25;
+      L.head.rotation.y = Math.sin(t * 1.8) * 0.35;
+      L.torso.rotation.y = Math.sin(t * 1.2) * 0.1;
+    } else if (anim === 'martial') {
+      L.armR.rotation.x = -1.5 + Math.sin(t * 8) * 0.5;
+      L.armL.rotation.x = -0.8;
+      L.armL.rotation.z = 0.6;
+      L.legR.rotation.x = -0.2 + Math.max(0, Math.sin(t * 8)) * 1.1;
+      L.torso.rotation.y = Math.sin(t * 4) * 0.3;
+      L.hips.position.y = Math.abs(Math.sin(t * 8)) * 0.06;
     }
   }
 
@@ -752,6 +782,13 @@ import { createChibiCharacter } from './chibi.js';
 
     // Canteen
     addZoneLabel(g, 'Khu căn tin', 4, 2, '#fff');
+    // Small stage in canteen
+    g.add(mesh(new THREE.BoxGeometry(4.5, 0.28, 3.2), mat(0x4a3030), 4, 0.16, 0));
+    g.add(mesh(new THREE.BoxGeometry(4.2, 0.05, 2.9), mat(0x7a4a30), 4, 0.32, 0, false));
+    g.add(mesh(new THREE.BoxGeometry(0.12, 1.8, 0.12), mat(0x222222), 2.2, 1.1, -1.3, false));
+    g.add(mesh(new THREE.BoxGeometry(0.12, 1.8, 0.12), mat(0x222222), 5.8, 1.1, -1.3, false));
+    g.add(mesh(new THREE.BoxGeometry(3.8, 0.1, 0.12), mat(0xffcc33), 4, 2.0, -1.3, false));
+    addZoneLabel(g, 'Sân khấu căn tin', 4, 0, '#ffd');
     for (let row = 0; row < 3; row++) {
       for (let col = 0; col < 4; col++) {
         addCanteenTable(g, -8 + col * 5.2, -2 + row * 4.2);
@@ -823,13 +860,20 @@ import { createChibiCharacter } from './chibi.js';
     g.add(mesh(new THREE.CylinderGeometry(0.15, 0.2, 0.9, 8), mat(0xff6688), 38, 0.5, -6, false)); // flower
     g.add(mesh(new THREE.SphereGeometry(0.25, 8, 6), mat(0xffaa33), 38, 1.05, -6, false));
 
-    // Yard / basketball
+    // Yard / basketball + sân khấu
     addZoneLabel(g, 'Sân chơi', 0, 30, '#fff');
     g.add(mesh(new THREE.BoxGeometry(26, 0.12, 20), mat(0xc45a2a), 0, 0.02, 32, false));
     g.add(mesh(new THREE.BoxGeometry(10, 0.02, 0.08), mat(0xffffff), 0, 0.1, 32, false));
     g.add(mesh(new THREE.BoxGeometry(0.15, 3.2, 0.15), mat(0x888888), 0, 1.6, 23));
     g.add(mesh(new THREE.BoxGeometry(1.4, 0.9, 0.08), mat(0xffffff), 0, 3.3, 23, false));
     g.add(mesh(new THREE.TorusGeometry(0.45, 0.04, 8, 16), mat(0xff6600), 0, 2.9, 22.7, false));
+    // Stage platform (yard)
+    g.add(mesh(new THREE.BoxGeometry(6.5, 0.35, 4.2), mat(0x5a3a28), 0, 0.2, 28));
+    g.add(mesh(new THREE.BoxGeometry(6.2, 0.06, 3.9), mat(0x8b5a2b), 0, 0.4, 28, false));
+    g.add(mesh(new THREE.BoxGeometry(0.18, 2.4, 0.18), mat(0x333333), -3.0, 1.5, 26.2, false));
+    g.add(mesh(new THREE.BoxGeometry(0.18, 2.4, 0.18), mat(0x333333), 3.0, 1.5, 26.2, false));
+    g.add(mesh(new THREE.BoxGeometry(6.4, 0.12, 0.18), mat(0xff3344), 0, 2.7, 26.2, false));
+    addZoneLabel(g, 'Sân khấu', 0, 28, '#ffd');
 
     // Perimeter
     const wallGrey = concrete;

@@ -18,7 +18,11 @@
   let nightMode = false;
 
   const LS_KEY = 'otu_guest_v3';
+  const SESSION_KEY = 'otu_session_v11';
   const socket = io({ transports: ['websocket', 'polling'] });
+  let authTab = 'login';
+  let pendingShow = null;
+  let rhythmState = null;
 
   function loadGuest() {
     try { return JSON.parse(localStorage.getItem(LS_KEY) || localStorage.getItem('otu_guest_v2') || 'null'); } catch { return null; }
@@ -26,6 +30,16 @@
   function saveGuest(data) {
     try { localStorage.setItem(LS_KEY, JSON.stringify(data)); } catch {}
   }
+  function loadSession() {
+    try { return JSON.parse(localStorage.getItem(SESSION_KEY) || 'null'); } catch { return null; }
+  }
+  function saveSession(nickname, token) {
+    try {
+      if (!nickname || !token) localStorage.removeItem(SESSION_KEY);
+      else localStorage.setItem(SESSION_KEY, JSON.stringify({ nickname, token }));
+    } catch {}
+  }
+  function clearSession() { try { localStorage.removeItem(SESSION_KEY); } catch {} }
   function escapeHtml(s) {
     return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   }
@@ -171,6 +185,47 @@
     $('#nick-dem').textContent = `${$('#nick').value.length}/16`;
   }
 
+  function setAuthTab(tab) {
+    authTab = tab;
+    $$('.auth-tab').forEach((b) => b.classList.toggle('on', b.dataset.auth === tab));
+    const login = $('#auth-login');
+    const reg = $('#auth-register');
+    const claim = $('#auth-claim');
+    if (login) login.hidden = tab !== 'login';
+    if (reg) reg.hidden = tab !== 'register';
+    if (claim) claim.hidden = tab !== 'claim';
+    $('#join-error').textContent = '';
+  }
+  $$('.auth-tab').forEach((b) => b.onclick = () => setAuthTab(b.dataset.auth));
+
+  function tryAutoLogin() {
+    const sess = loadSession();
+    if (!sess || !sess.nickname || !sess.token) return;
+    if ($('#login-nick')) $('#login-nick').value = sess.nickname;
+    socket.emit('login', { nickname: sess.nickname, sessionToken: sess.token });
+  }
+
+  $('#btn-login').onclick = () => {
+    $('#join-error').textContent = '';
+    const nickname = ($('#login-nick').value || '').trim();
+    const password = $('#login-pass').value || '';
+    if (nickname.length < 2) { $('#join-error').textContent = 'Nhập biệt danh.'; return; }
+    if (!password) { $('#join-error').textContent = 'Nhập mật khẩu.'; return; }
+    saveGuest({ ...(loadGuest() || {}), nickname });
+    socket.emit('login', { nickname, password });
+  };
+  $('#login-pass').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('#btn-login').click(); });
+
+  $('#btn-claim').onclick = () => {
+    $('#join-error').textContent = '';
+    const nickname = ($('#claim-nick').value || '').trim();
+    const password = $('#claim-pass').value || '';
+    const password2 = $('#claim-pass2').value || '';
+    if (password !== password2) { $('#join-error').textContent = 'Mật khẩu nhập lại không khớp.'; return; }
+    if (password.length < 6) { $('#join-error').textContent = 'Mật khẩu phải từ 6 ký tự.'; return; }
+    socket.emit('claimPassword', { nickname, password });
+  };
+
   $('#btn-join').onclick = () => {
     $('#join-error').textContent = '';
     const nickname = $('#nick').value.trim();
@@ -178,12 +233,16 @@
     const crimeId = $('#crime').value;
     const crimeCustom = $('#crimeCustom').value.trim();
     const sentenceId = $('#sentence').value;
+    const password = ($('#reg-pass') && $('#reg-pass').value) || '';
+    const password2 = ($('#reg-pass2') && $('#reg-pass2').value) || '';
+    if (password !== password2) { $('#join-error').textContent = 'Mật khẩu nhập lại không khớp.'; return; }
+    if (password.length < 6) { $('#join-error').textContent = 'Mật khẩu phải từ 6 ký tự.'; return; }
     saveGuest({
       nickname, fullName, crimeId, crimeCustom, sentenceId, appearance,
       guestId: (saved && saved.guestId) || Math.random().toString(36).slice(2),
       prisonerNo: saved && saved.prisonerNo,
     });
-    socket.emit('join', { nickname, fullName, crimeId, crimeCustom, sentenceId, appearance });
+    socket.emit('register', { nickname, fullName, crimeId, crimeCustom, sentenceId, appearance, password });
   };
   $('#nick').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('#btn-join').click(); });
 
@@ -932,6 +991,139 @@
   // Mobile quick actions
   $('#mob-wave').onclick = () => socket.emit('action', 'wave');
   $('#mob-sit').onclick = () => socket.emit('action', 'sit');
+  const mobPerf = $('#mob-perform');
+  if (mobPerf) mobPerf.onclick = () => openPerformPick();
+  const mobCheer = $('#mob-cheer');
+  if (mobCheer) mobCheer.onclick = () => doCheer();
+
+  function openPerformPick() {
+    const box = $('#perform-kinds');
+    const kinds = (config.performKinds) || {
+      sing: { id: 'sing', name: 'Ca hát', emoji: '🎤' },
+      dance: { id: 'dance', name: 'Múa', emoji: '💃' },
+      pushup_show: { id: 'pushup_show', name: 'Hít đất', emoji: '🏋️' },
+      story: { id: 'story', name: 'Kể chuyện', emoji: '📖' },
+      martial: { id: 'martial', name: 'Võ thuật', emoji: '🥋' },
+    };
+    box.innerHTML = Object.values(kinds).map((k) =>
+      `<button type="button" data-pk="${k.id}"><span>${k.emoji}</span><b>${escapeHtml(k.name)}</b></button>`
+    ).join('');
+    $$('#perform-kinds [data-pk]').forEach((b) => {
+      b.onclick = () => { $('#perform-pick').hidden = true; startRhythm(b.dataset.pk); };
+    });
+    $('#perform-pick').hidden = false;
+  }
+  const dockPerf = $('#dock-perform');
+  if (dockPerf) dockPerf.onclick = () => openPerformPick();
+  const pickX = $('#perform-pick-x');
+  if (pickX) pickX.onclick = () => { $('#perform-pick').hidden = true; };
+
+  function startRhythm(kind) {
+    const def = (config.performKinds && config.performKinds[kind]) || { hits: 6, bpm: 100, name: kind, emoji: '🎭', durationMs: 7000 };
+    const hitsNeeded = def.hits || 6;
+    const interval = 60000 / (def.bpm || 100);
+    const track = $('#rhythm-track');
+    // keep hitline
+    track.querySelectorAll('.rhythm-note').forEach((n) => n.remove());
+    $('#rhythm-title').textContent = `${def.emoji || '🎭'} ${def.name || kind}`;
+    $('#rhythm-hint').textContent = 'Chạm khi nốt tới vạch vàng!';
+    $('#perform-rhythm').hidden = false;
+    const hits = [];
+    let idx = 0;
+    let finished = false;
+    const startAt = performance.now() + 700;
+    rhythmState = { kind, hits, hitsNeeded, interval, startAt, notes: [] };
+
+    for (let i = 0; i < hitsNeeded; i++) {
+      const el = document.createElement('div');
+      el.className = 'rhythm-note';
+      el.textContent = '●';
+      el.style.left = '100%';
+      track.appendChild(el);
+      const due = startAt + i * interval;
+      rhythmState.notes.push({ el, due, done: false });
+    }
+
+    function tick() {
+      if (finished) return;
+      const now = performance.now();
+      let allDone = true;
+      for (const n of rhythmState.notes) {
+        if (n.done) continue;
+        allDone = false;
+        const dt = n.due - now;
+        // map: +900ms => right 100%, 0 => 50%, -400 => left
+        const pct = 50 + (dt / 900) * 50;
+        n.el.style.left = Math.max(-10, Math.min(110, pct)) + '%';
+        if (dt < -280) {
+          n.done = true;
+          n.el.classList.add('miss');
+          hits.push({ offsetMs: 999, tapped: false });
+        }
+      }
+      $('#rhythm-score').textContent = `${hits.filter((h) => Math.abs(h.offsetMs) <= 220).length} / ${hitsNeeded}`;
+      if (hits.length >= hitsNeeded || (allDone && now > startAt + hitsNeeded * interval + 400)) {
+        finished = true;
+        finishRhythm();
+        return;
+      }
+      requestAnimationFrame(tick);
+    }
+    requestAnimationFrame(tick);
+
+    const tapBtn = $('#rhythm-tap');
+    tapBtn.onclick = () => {
+      if (finished || !rhythmState) return;
+      const now = performance.now();
+      let best = null;
+      let bestAbs = 9999;
+      for (const n of rhythmState.notes) {
+        if (n.done) continue;
+        const off = now - n.due;
+        const a = Math.abs(off);
+        if (a < bestAbs) { bestAbs = a; best = n; }
+      }
+      if (!best || bestAbs > 280) {
+        hits.push({ offsetMs: 400, tapped: true });
+        if (otuAudio) { unlockAudio(); otuAudio.rhythmHit(false); }
+        return;
+      }
+      best.done = true;
+      const off = now - best.due;
+      hits.push({ offsetMs: off, tapped: true });
+      best.el.classList.add(Math.abs(off) <= 70 ? 'ok' : 'ok');
+      if (otuAudio) { unlockAudio(); otuAudio.rhythmHit(Math.abs(off) <= 70); }
+    };
+    function finishRhythm() {
+      $('#perform-rhythm').hidden = true;
+      if (otuAudio) { unlockAudio(); otuAudio.perform(kind); }
+      socket.emit('perform', { kind, hits: hits.slice(0, hitsNeeded + 2) });
+      rhythmState = null;
+    }
+  }
+
+  function doCheer() {
+    if (!pendingShow) return;
+    socket.emit('performCheer', { showId: pendingShow.showId });
+    if (otuAudio) { unlockAudio(); otuAudio.cheer(); }
+  }
+
+  socket.on('performShow', (show) => {
+    pendingShow = show;
+    const cheerBtn = $('#mob-cheer');
+    if (cheerBtn && me && show.performerId !== me.id) {
+      cheerBtn.hidden = false;
+      setTimeout(() => { if (pendingShow && pendingShow.showId === show.showId) cheerBtn.hidden = true; }, (show.until - Date.now()) || 8000);
+    }
+    if (world3d && show.nick) world3d.showBubble(show.performerId, `${show.emoji || '🎭'} ${show.name}`, 5000);
+    toast(`${show.emoji || '🎭'} ${show.nick} đang ${show.name}!`);
+  });
+  socket.on('performResult', (r) => {
+    toast(r.message || '');
+    if (r && r.kind && otuAudio && !r.cheerBonus) { unlockAudio(); otuAudio.perform(r.kind); }
+  });
+  socket.on('performCheer', (r) => toast(`👏 ${r.from} cổ vũ bạn! (${r.cheers})`));
+  socket.on('performCheerFx', () => { if (otuAudio) { unlockAudio(); otuAudio.cheer(); } });
 
   // Top tools
   $('#btn-help').onclick = () => { $('#help-modal').hidden = false; };
@@ -1113,16 +1305,35 @@
         $('#crimeCustom').hidden = false;
         if (saved.crimeCustom) $('#crimeCustom').value = saved.crimeCustom;
       }
+      if (saved.nickname) {
+        if ($('#login-nick')) $('#login-nick').value = saved.nickname;
+        if ($('#nick')) $('#nick').value = saved.nickname;
+      }
       updatePreviewCard();
     }
+    const sess = loadSession();
+    if (sess && sess.nickname && $('#login-nick')) $('#login-nick').value = sess.nickname;
+    setAuthTab('login');
+    tryAutoLogin();
   });
+
+  socket.on('needClaim', (info) => {
+    setAuthTab('claim');
+    if ($('#claim-nick')) $('#claim-nick').value = (info && info.nickname) || '';
+    if ($('#claim-msg') && info && info.message) $('#claim-msg').textContent = info.message;
+    $('#join-error').textContent = '';
+    toast((info && info.message) || 'Cần đặt mật khẩu');
+  });
+  socket.on('sessionInvalid', () => { clearSession(); });
 
   socket.on('joined', (info) => {
     $('#join-screen').hidden = true;
     showGameUI(true);
     const g = loadGuest() || {};
     g.prisonerNo = info.prisonerNo || g.prisonerNo;
+    g.nickname = info.nickname || g.nickname;
     saveGuest(g);
+    if (info && info.sessionToken) saveSession(info.nickname, info.sessionToken);
     initWorld();
     const wb = $('#welcome-banner');
     wb.hidden = false;

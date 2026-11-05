@@ -6,6 +6,9 @@ const path = require('path');
 const crypto = require('crypto');
 const { createClient } = require('@supabase/supabase-js');
 const v6 = require('./lib/v7');
+const performLib = require('./lib/perform');
+const auth = require('./lib/auth');
+const activeShows = new Map(); // showId -> { performerId, kind, x, z, cheers:Set, until, quality }
 
 const PORT = process.env.PORT || 3847;
 const DATA_FILE = path.join(__dirname, 'data', 'players.json');
@@ -19,7 +22,7 @@ const supabase = useSupabase
   : null;
 const MAX_PLAYERS = Math.max(1, parseInt(process.env.MAX_PLAYERS || '10000', 10) || 10000);
 const NPC_COUNT = Math.max(0, parseInt(process.env.NPC_COUNT || '16', 10) || 16);
-const VERSION = '3d-v10';
+const VERSION = '3d-v11';
 
 /** Guard NPCs — patrol, vision, bribe window (in-game money only) */
 const GUARD_DEFS = [
@@ -256,7 +259,7 @@ const APPEARANCE = {
   // legacy stripe ids still accepted; country drives uniform for new chars
   stripes: [
     { id: 'bw', light: '#f5f5f5', dark: '#151515', name: 'Sọc VN' },
-    { id: 'orange', light: '#ff7a1a', dark: '#e86810', name: 'Áo cam Mỹ' },
+    { id: 'orange', light: '#FF6A00', dark: '#E05500', name: 'Áo cam Mỹ' },
     { id: 'blue', light: '#e8f0ff', dark: '#1a3050', name: 'Sọc TQ' },
     { id: 'brown', light: '#8b5a2b', dark: '#5a3a1a', name: 'Nâu' },
     { id: 'police', light: '#2f5a32', dark: '#1a3018', name: 'Quản giáo VN' },
@@ -304,6 +307,9 @@ const ACHIEVEMENTS = [
   { id: 'letter_10', name: 'Nhà văn tường Bảng Thư', desc: 'Gửi 10 lá thư', stat: 'lettersSent', target: 10, points: 30 },
   { id: 'mark_7', name: 'Gạch ngày bền bỉ', desc: 'Gạch 7 ngày trên tường', stat: 'daysMarked', target: 7, points: 15 },
   { id: 'good_behavior', name: 'Cải tạo tốt', desc: 'Không vượt ngục thất bại', stat: 'cleanRecord', target: 1, points: 25 },
+  { id: 'perform_1', name: 'Lần đầu lên sân', desc: 'Biểu diễn 1 lần (hát/múa/võ…)', stat: 'performCount', target: 1, points: 12 },
+  { id: 'perform_10', name: 'Nghệ sĩ sân trại', desc: 'Biểu diễn 10 lần', stat: 'performCount', target: 10, points: 35 },
+  { id: 'cheer_5', name: 'Cổ vũ nhiệt tình', desc: 'Vỗ tay cổ vũ 5 buổi biểu diễn', stat: 'cheerCount', target: 5, points: 15 },
 ];
 
 const DAY_TICK_MS = 18000; // 1 in-game day ~18s real
@@ -366,6 +372,8 @@ function computeAchievementProgress(p) {
     lettersSent: p.lettersSent || 0,
     daysMarked: p.daysMarked || 0,
     cleanRecord: (p.escapeFails || 0) === 0 ? 1 : 0,
+    performCount: p.performCount || 0,
+    cheerCount: p.cheerCount || 0,
   };
   return ACHIEVEMENTS.map((a) => {
     const cur = Math.min(stats[a.stat] || 0, a.target);
@@ -383,6 +391,8 @@ function unlockAchievements(p, socket) {
     lettersSent: p.lettersSent || 0,
     daysMarked: p.daysMarked || 0,
     cleanRecord: (p.escapeFails || 0) === 0 ? 1 : 0,
+    performCount: p.performCount || 0,
+    cheerCount: p.cheerCount || 0,
   };
   const newly = [];
   for (const a of ACHIEVEMENTS) {
@@ -456,6 +466,10 @@ function defaultPlayer(payload, socketId) {
     escapeFails: 0,
     totalEarned: 0,
     daysMarked: 0,
+    performCount: 0,
+    cheerCount: 0,
+    performHourTs: [],
+    activeShowId: null,
     winsCaro: 0,
     winsRps: 0,
     winsQuiz: 0,
@@ -519,8 +533,13 @@ function ensureDataDir() {
 }
 
 function stripTransient(p) {
-  const { id, cooldowns, emote, emoteUntil, sleeping, bribeGuardId, bribeUntil, ...rest } = p;
-  return { ...rest, cooldowns: {}, sleeping: false, emote: null, bribeGuardId: null, bribeUntil: 0 };
+  const { id, cooldowns, emote, emoteUntil, sleeping, bribeGuardId, bribeUntil, activeShowId, ...rest } = p;
+  return { ...rest, cooldowns: {}, sleeping: false, emote: null, bribeGuardId: null, bribeUntil: 0, activeShowId: null };
+}
+
+function clientIp(socket) {
+  const xf = (socket.handshake.headers['x-forwarded-for'] || '').split(',')[0].trim();
+  return xf || socket.handshake.address || 'unknown';
 }
 
 function loadDataFromJson() {
@@ -736,6 +755,8 @@ function publicPlayer(p) {
     winsTienLen: p.winsTienLen || 0,
     gameWins: p.gameWins || 0,
     workCount: p.workCount || 0,
+    performCount: p.performCount || 0,
+    cheerCount: p.cheerCount || 0,
     lettersSent: p.lettersSent || 0,
     scheduleAttend: p.scheduleAttend || 0,
     guardPatrols: p.guardPatrols || 0,
@@ -1234,6 +1255,7 @@ io.on('connection', (socket) => {
   socket.emit('config', {
     jobs: JOBS, shop: SHOP, rooms: ROOMS, appearance: APPEARANCE, roomGraph: ROOM_GRAPH,
     crimes: CRIMES, sentences: SENTENCE_OPTIONS, achievements: ACHIEVEMENTS, ranks: RANKS,
+    performKinds: performLib.PERFORM_KINDS, stageSpots: performLib.STAGE_SPOTS,
     guardRanks: v6.GUARD_RANKS, dailyQuests: v6.DAILY_QUESTS, rankQuests: v6.RANK_QUESTS, guardQuests: v6.GUARD_QUESTS,
     cellCapacity: v6.CELL_CAPACITY, cellCount: CELL_COUNT, zones: v6.ZONES,
     intakeNeedMs: v6.INTAKE_NEED_MS,
@@ -1244,44 +1266,33 @@ io.on('connection', (socket) => {
   socket.emit('schedule', currentSchedule());
   socket.emit('letters', letters.slice(-20).reverse());
 
-  socket.on('join', (payload) => {
-    payload = payload || {};
-    let nickname = String(payload.nickname || '').trim().slice(0, 16).replace(/[<>]/g, '');
-    if (!nickname || nickname.length < 2) {
-      socket.emit('errorMsg', 'Biệt danh phải từ 2–16 ký tự.');
-      return;
-    }
-    const alreadyOnline = [...online.values()].some(
-      (p) => p.nickname.toLowerCase() === nickname.toLowerCase() && p.id !== socket.id
-    );
-    const registered = Object.keys(playersByNick).length;
-    const isReturning = !!playersByNick[nickname.toLowerCase()];
-    if (online.size >= MAX_PLAYERS && !alreadyOnline) {
-      socket.emit('errorMsg', `Trại đã đầy (${MAX_PLAYERS.toLocaleString('vi-VN')} chỗ online). Thử lại sau nhé!`);
-      return;
-    }
-    if (!isReturning && registered >= MAX_PLAYERS) {
-      socket.emit('errorMsg', `Đã đủ ${MAX_PLAYERS.toLocaleString('vi-VN')} tù nhân đăng ký. Trại tạm ngưng nhận án mới — quay lại sau bạn nhé!`);
-      return;
-    }
-    const fullName = String(payload.fullName || nickname).trim().slice(0, 40).replace(/[<>]/g, '');
-    if (!fullName || fullName.length < 2) {
-      socket.emit('errorMsg', 'Họ tên phải từ 2 ký tự.');
-      return;
-    }
-    const taken = [...online.values()].some(
-      (p) => p.nickname.toLowerCase() === nickname.toLowerCase() && p.id !== socket.id
-    );
-    if (taken) {
-      socket.emit('errorMsg', 'Biệt danh đang online. Chọn tên khác.');
-      return;
-    }
 
-    const key = nickname.toLowerCase();
-    let p;
+  async function enterGame(socket, p, key, { isNew, sessionToken } = {}) {
+    unlockAchievements(p, socket);
+    online.set(socket.id, p);
+    playersByNick[key] = stripTransient(p);
+    void saveData();
+    emitSelf(socket, p);
+    const payload = {
+      nickname: p.nickname,
+      appearance: p.appearance,
+      prisonerNo: p.prisonerNo,
+      sessionToken: sessionToken || null,
+      hasPassword: !!p.passwordHash,
+    };
+    socket.emit('joined', payload);
+    pushChat({
+      type: 'system',
+      text: `${p.nickname} (${p.prisonerNo}) đã vào trại — án ${p.sentenceLeftDays} ngày.`,
+      ts: Date.now(),
+    });
+    broadcastState();
+  }
+
+  function materializePlayer(socket, payload, nickname, fullName, saved, key) {
     const incoming = { ...payload, nickname, fullName };
-    if (playersByNick[key] && !playersByNick[key].escaped && !playersByNick[key].released) {
-      const saved = playersByNick[key];
+    let p;
+    if (saved && !saved.escaped && !saved.released) {
       p = {
         ...defaultPlayer(incoming, socket.id),
         ...saved,
@@ -1293,33 +1304,44 @@ io.on('connection', (socket) => {
         released: false,
         emote: null,
         sleeping: false,
+        activeShowId: null,
       };
-      if (payload.appearance) p.appearance = normalizeAppearance(payload.appearance);
+      // keep auth fields from saved
+      p.passwordHash = saved.passwordHash || null;
+      p.authSessions = Array.isArray(saved.authSessions) ? saved.authSessions.slice() : [];
+      if (payload.appearance && payload.mode === 'register') p.appearance = normalizeAppearance(payload.appearance);
       else p.appearance = normalizeAppearance(p.appearance);
       if (!p.prisonerNo) p.prisonerNo = prisonerNumber();
-      if (!p.crimeLabel) p.crimeLabel = incoming.crimeId === 'custom' ? (payload.crimeCustom || saved.crimeLabel) : (CRIMES.find((c) => c.id === (payload.crimeId || saved.crimeId)) || CRIMES[0]).label;
+      if (!p.crimeLabel) {
+        p.crimeLabel = incoming.crimeId === 'custom'
+          ? (payload.crimeCustom || saved.crimeLabel)
+          : (CRIMES.find((c) => c.id === (payload.crimeId || saved.crimeId)) || CRIMES[0]).label;
+      }
       if (p.sentenceLeftDays == null) p.sentenceLeftDays = p.sentenceTotalDays || 90;
-      p.maxHealth = 100 + (p.upgrades.giuong || 0) * 10;
+      p.maxHealth = 100 + (p.upgrades?.giuong || 0) * 10;
       p.health = Math.min(p.health, p.maxHealth);
       if (p.x == null) { p.x = ROOM_BY_ID[p.room]?.x || 0; p.z = ROOM_BY_ID[p.room]?.z || 0; }
-    } else if (playersByNick[key] && (playersByNick[key].escaped || playersByNick[key].released)) {
+    } else if (saved && (saved.escaped || saved.released)) {
       p = defaultPlayer(incoming, socket.id);
-      p.reputation = Math.max(0, (playersByNick[key].reputation || 0) - 5);
-      p.gameWins = playersByNick[key].gameWins || 0;
-      p.winsCaro = playersByNick[key].winsCaro || 0;
-      p.winsRps = playersByNick[key].winsRps || 0;
-      p.rankXp = playersByNick[key].rankXp || 0;
+      p.reputation = Math.max(0, (saved.reputation || 0) - 5);
+      p.gameWins = saved.gameWins || 0;
+      p.winsCaro = saved.winsCaro || 0;
+      p.winsRps = saved.winsRps || 0;
+      p.rankXp = saved.rankXp || 0;
       p.rankId = rankFromXp(p.rankXp).id;
+      p.passwordHash = saved.passwordHash || null;
+      p.authSessions = Array.isArray(saved.authSessions) ? saved.authSessions.slice() : [];
     } else {
       p = defaultPlayer(incoming, socket.id);
+      p.passwordHash = null;
+      p.authSessions = [];
     }
     p.rankXp = p.rankXp || 0;
     p.rankId = rankFromXp(p.rankXp).id;
     p.role = p.role || 'prisoner';
-    // Restore guard career if previously promoted
-    if (playersByNick[key] && playersByNick[key].role === 'guard') {
+    if (saved && saved.role === 'guard') {
       p.role = 'guard';
-      p.guardXp = playersByNick[key].guardXp || 0;
+      p.guardXp = saved.guardXp || 0;
       p.guardRankId = v6.guardRankFromXp(p.guardXp).id;
       p.appearance = { ...(p.appearance || {}), stripe: 'police' };
       p.released = true;
@@ -1362,17 +1384,197 @@ io.on('connection', (socket) => {
       }
       p.happinessUnlocked = v6.happinessUnlocked(p);
     }
+    if (p.performCount == null) p.performCount = 0;
+    if (p.cheerCount == null) p.cheerCount = 0;
+    if (!Array.isArray(p.performHourTs)) p.performHourTs = [];
+    return p;
+  }
 
-    // unlock good_behavior baseline check later; grant clean if no fails
-    unlockAchievements(p, socket);
+  socket.on('login', async (payload) => {
+    try {
+      payload = payload || {};
+      let nickname = String(payload.nickname || '').trim().slice(0, 16).replace(/[<>]/g, '');
+      if (!nickname || nickname.length < 2) {
+        socket.emit('errorMsg', 'Biệt danh phải từ 2–16 ký tự.');
+        return;
+      }
+      const key = nickname.toLowerCase();
+      const ip = clientIp(socket);
+      const rate = auth.checkLoginRate(key, ip);
+      if (!rate.ok) {
+        socket.emit('errorMsg', `Đăng nhập bị khóa tạm — thử lại sau ${Math.ceil(rate.retryAfterMs / 1000)}s.`);
+        return;
+      }
+      const saved = playersByNick[key];
+      if (!saved) {
+        auth.recordLoginFail(key, ip);
+        socket.emit('errorMsg', 'Không tìm thấy tài khoản. Hãy tạo nhân vật mới.');
+        return;
+      }
+      const alreadyOnline = [...online.values()].some(
+        (pl) => pl.nickname.toLowerCase() === key && pl.id !== socket.id
+      );
+      if (alreadyOnline) {
+        socket.emit('errorMsg', 'Tài khoản đang online trên thiết bị khác.');
+        return;
+      }
+      if (online.size >= MAX_PLAYERS) {
+        socket.emit('errorMsg', `Trại đã đầy (${MAX_PLAYERS.toLocaleString('vi-VN')} chỗ online).`);
+        return;
+      }
 
-    online.set(socket.id, p);
-    playersByNick[key] = stripTransient(p);
-    saveData();
-    emitSelf(socket, p);
-    socket.emit('joined', { nickname: p.nickname, appearance: p.appearance, prisonerNo: p.prisonerNo });
-    pushChat({ type: 'system', text: `${p.nickname} (${p.prisonerNo}) đã vào trại — án ${p.sentenceLeftDays} ngày.`, ts: Date.now() });
-    broadcastState();
+      // Legacy account without password — ask client to claim
+      if (!saved.passwordHash) {
+        if (payload.sessionToken && auth.verifySession(saved, payload.sessionToken)) {
+          /* ok */
+        } else {
+          auth.clearLoginFails(key, ip);
+          socket.emit('needClaim', {
+            nickname: saved.nickname || nickname,
+            fullName: saved.fullName || nickname,
+            message: 'Tài khoản cũ chưa có mật khẩu. Đặt mật khẩu để bảo vệ tiến trình.',
+          });
+          return;
+        }
+      } else if (payload.sessionToken) {
+        if (!auth.verifySession(saved, payload.sessionToken)) {
+          auth.recordLoginFail(key, ip);
+          socket.emit('errorMsg', 'Phiên đăng nhập hết hạn. Hãy đăng nhập lại bằng mật khẩu.');
+          socket.emit('sessionInvalid', {});
+          return;
+        }
+      } else {
+        const pw = String(payload.password || '');
+        const ok = await auth.verifyPassword(pw, saved.passwordHash);
+        if (!ok) {
+          auth.recordLoginFail(key, ip);
+          socket.emit('errorMsg', 'Sai biệt danh hoặc mật khẩu.');
+          return;
+        }
+      }
+      auth.clearLoginFails(key, ip);
+      const fullName = saved.fullName || nickname;
+      const p = materializePlayer(socket, { ...payload, mode: 'login' }, nickname, fullName, saved, key);
+      const sess = auth.issueSession(p);
+      await enterGame(socket, p, key, { isNew: false, sessionToken: sess.token });
+    } catch (e) {
+      console.error('[login]', e && e.message);
+      socket.emit('errorMsg', 'Lỗi đăng nhập. Thử lại.');
+    }
+  });
+
+  socket.on('claimPassword', async (payload) => {
+    try {
+      payload = payload || {};
+      let nickname = String(payload.nickname || '').trim().slice(0, 16).replace(/[<>]/g, '');
+      const key = nickname.toLowerCase();
+      const ip = clientIp(socket);
+      const rate = auth.checkLoginRate(key, ip);
+      if (!rate.ok) {
+        socket.emit('errorMsg', `Thử lại sau ${Math.ceil(rate.retryAfterMs / 1000)}s.`);
+        return;
+      }
+      const saved = playersByNick[key];
+      if (!saved) {
+        socket.emit('errorMsg', 'Không tìm thấy tài khoản.');
+        return;
+      }
+      if (saved.passwordHash) {
+        socket.emit('errorMsg', 'Tài khoản đã có mật khẩu — hãy đăng nhập.');
+        return;
+      }
+      const err = auth.validatePasswordStrength(payload.password);
+      if (err) { socket.emit('errorMsg', err); return; }
+      const alreadyOnline = [...online.values()].some(
+        (pl) => pl.nickname.toLowerCase() === key && pl.id !== socket.id
+      );
+      if (alreadyOnline) {
+        socket.emit('errorMsg', 'Tài khoản đang online.');
+        return;
+      }
+      saved.passwordHash = await auth.hashPassword(String(payload.password));
+      saved.authSessions = [];
+      playersByNick[key] = saved;
+      auth.clearLoginFails(key, ip);
+      const fullName = saved.fullName || nickname;
+      const p = materializePlayer(socket, { ...payload, mode: 'login' }, nickname, fullName, saved, key);
+      p.passwordHash = saved.passwordHash;
+      const sess = auth.issueSession(p);
+      await enterGame(socket, p, key, { isNew: false, sessionToken: sess.token });
+    } catch (e) {
+      console.error('[claimPassword]', e && e.message);
+      socket.emit('errorMsg', 'Không đặt được mật khẩu.');
+    }
+  });
+
+  socket.on('register', async (payload) => {
+    try {
+      payload = payload || {};
+      let nickname = String(payload.nickname || '').trim().slice(0, 16).replace(/[<>]/g, '');
+      if (!nickname || nickname.length < 2) {
+        socket.emit('errorMsg', 'Biệt danh phải từ 2–16 ký tự.');
+        return;
+      }
+      const key = nickname.toLowerCase();
+      if (playersByNick[key]) {
+        socket.emit('errorMsg', 'Biệt danh đã tồn tại. Hãy đăng nhập.');
+        return;
+      }
+      const registered = Object.keys(playersByNick).length;
+      if (online.size >= MAX_PLAYERS) {
+        socket.emit('errorMsg', `Trại đã đầy (${MAX_PLAYERS.toLocaleString('vi-VN')} chỗ online).`);
+        return;
+      }
+      if (registered >= MAX_PLAYERS) {
+        socket.emit('errorMsg', `Đã đủ ${MAX_PLAYERS.toLocaleString('vi-VN')} tù nhân đăng ký.`);
+        return;
+      }
+      const fullName = String(payload.fullName || nickname).trim().slice(0, 40).replace(/[<>]/g, '');
+      if (!fullName || fullName.length < 2) {
+        socket.emit('errorMsg', 'Họ tên phải từ 2 ký tự.');
+        return;
+      }
+      const err = auth.validatePasswordStrength(payload.password);
+      if (err) { socket.emit('errorMsg', err); return; }
+      const taken = [...online.values()].some(
+        (pl) => pl.nickname.toLowerCase() === key && pl.id !== socket.id
+      );
+      if (taken) {
+        socket.emit('errorMsg', 'Biệt danh đang online. Chọn tên khác.');
+        return;
+      }
+      const p = materializePlayer(socket, { ...payload, mode: 'register' }, nickname, fullName, null, key);
+      p.passwordHash = await auth.hashPassword(String(payload.password));
+      p.authSessions = [];
+      const sess = auth.issueSession(p);
+      await enterGame(socket, p, key, { isNew: true, sessionToken: sess.token });
+    } catch (e) {
+      console.error('[register]', e && e.message);
+      socket.emit('errorMsg', 'Không tạo được nhân vật.');
+    }
+  });
+
+  // Legacy join → point clients at register/login tabs
+  socket.on('join', (payload) => {
+    payload = payload || {};
+    const key = String(payload.nickname || '').trim().toLowerCase();
+    if (payload.sessionToken || payload.password) {
+      // Old clients: treat as login attempt via dedicated event semantics
+      socket.emit('errorMsg', 'Phiên bản mới: hãy tải lại trang rồi Đăng nhập.');
+      return;
+    }
+    if (key && playersByNick[key]) {
+      socket.emit('errorMsg', 'Tài khoản đã có — dùng tab Đăng nhập.');
+      if (!playersByNick[key].passwordHash) {
+        socket.emit('needClaim', {
+          nickname: playersByNick[key].nickname || payload.nickname,
+          fullName: playersByNick[key].fullName || payload.nickname,
+          message: 'Tài khoản cũ chưa có mật khẩu. Đặt mật khẩu để tiếp tục.',
+        });
+      }
+      return;
+    }
+    socket.emit('errorMsg', 'Vui lòng dùng «Tạo nhân vật mới» và đặt mật khẩu.');
   });
 
   function doRoomMove(roomId) {
@@ -1472,6 +1674,151 @@ io.on('connection', (socket) => {
       p.sleeping = false; p.emote = null;
       socket.emit('actionResult', { kind, message: 'Bạn thức dậy.' });
     } else return;
+    emitSelf(socket, p);
+    broadcastState();
+  });
+
+  socket.on('perform', (payload) => {
+    const p = online.get(socket.id);
+    if (!p || p.escaped || p.released) return;
+    if (p.role === 'guard') { socket.emit('errorMsg', 'Quản giáo không biểu diễn trên sân tù.'); return; }
+    if (!p.intakeDone) { socket.emit('errorMsg', 'Hoàn thành tiếp nhận trước khi biểu diễn.'); return; }
+    const kind = String((payload && payload.kind) || '').trim();
+    const def = performLib.PERFORM_KINDS[kind];
+    if (!def) { socket.emit('errorMsg', 'Loại biểu diễn không hợp lệ.'); return; }
+    const now = Date.now();
+    if ((p.cooldowns.perform_global || 0) > now) {
+      socket.emit('errorMsg', 'Chờ một chút rồi biểu diễn tiếp.');
+      return;
+    }
+    if ((p.cooldowns['perform_' + kind] || 0) > now) {
+      const left = Math.ceil(((p.cooldowns['perform_' + kind] || 0) - now) / 1000);
+      socket.emit('errorMsg', `${def.emoji} ${def.name} còn chờ ${left}s.`);
+      return;
+    }
+    p.performHourTs = performLib.pruneHourWindow(p.performHourTs, now);
+    if (p.performHourTs.length >= performLib.MAX_PERFORMS_HOUR) {
+      socket.emit('errorMsg', 'Hôm nay bạn biểu diễn hơi nhiều rồi — nghỉ lấy sức.');
+      return;
+    }
+    if ((p.energy || 0) < def.energy) {
+      socket.emit('errorMsg', `Không đủ năng lượng (cần ${def.energy}).`);
+      return;
+    }
+    const quality = performLib.scoreQuality(kind, payload && payload.hits);
+    const stage = performLib.nearestStage(p.x, p.z);
+    const onStage = !!stage;
+    p.energy = Math.max(0, (p.energy || 0) - def.energy);
+    p.sleeping = false;
+    setEmote(p, def.emote, def.durationMs + 2000);
+    const showId = uid();
+    const until = now + def.durationMs + 4000;
+    activeShows.set(showId, {
+      id: showId, performerId: p.id, nick: p.nickname, kind, x: p.x, z: p.z,
+      cheers: new Set(), until, quality, onStage, stageId: stage && stage.id, baseAwarded: false,
+    });
+    p.activeShowId = showId;
+    p.cooldowns.perform_global = now + performLib.GLOBAL_CD_MS;
+    p.cooldowns['perform_' + kind] = now + def.cooldownMs;
+    p.performHourTs.push(now);
+    p.performCount = (p.performCount || 0) + 1;
+    const d = v6.ensureDaily(p);
+    d.dayPerform = (d.dayPerform || 0) + 1;
+    // provisional points (cheers add later via settle)
+    let pts = performLib.pointsFor(kind, quality, onStage, 0);
+    p.rehabPoints = (p.rehabPoints || 0) + pts;
+    grantRankXp(p, 4 + Math.floor(quality / 30), socket);
+    unlockAchievements(p, socket);
+    const stageTxt = onStage ? ` trên ${stage.name}` : ' (tự do ngoài sân khấu)';
+    const msg = `${def.emoji} ${def.name}${stageTxt}! Chất lượng ${quality}% → +${pts} điểm tích cực.`;
+    socket.emit('performResult', {
+      kind, quality, points: pts, onStage, stage: stage && stage.name, showId, message: msg,
+    });
+    socket.emit('actionResult', { kind: 'perform', message: msg });
+    pushChat({
+      type: 'system',
+      text: `${def.emoji} ${p.nickname} đang ${def.name.toLowerCase()}${onStage ? ' trên sân khấu' : ''}!`,
+      ts: now,
+    });
+    io.emit('performShow', {
+      showId, kind, name: def.name, emoji: def.emoji, nick: p.nickname,
+      performerId: p.id, x: p.x, z: p.z, until, quality, onStage,
+    });
+    emitSelf(socket, p);
+    broadcastState();
+    saveData();
+    setTimeout(() => {
+      const show = activeShows.get(showId);
+      if (!show) return;
+      const performer = online.get(show.performerId);
+      if (performer && performer.activeShowId === showId) {
+        const bonusCheers = show.cheers.size;
+        if (bonusCheers > 0) {
+          const extra = Math.min(performLib.MAX_CHEERS, bonusCheers) * performLib.CHEER_BONUS;
+          // pointsFor already counted 0 cheers earlier; add cheer bonus now
+          performer.rehabPoints = (performer.rehabPoints || 0) + extra;
+          const sock = [...online.entries()].find(([id]) => id === show.performerId);
+          // online is Map socketId -> player; performer.id is socket id
+          const psock = io.sockets.sockets.get(show.performerId);
+          if (psock) {
+            psock.emit('performResult', {
+              kind: show.kind, cheerBonus: extra, cheers: bonusCheers,
+              message: `👏 Cổ vũ +${extra} điểm tích cực (${bonusCheers} người).`,
+            });
+            emitSelf(psock, performer);
+          }
+        }
+        performer.activeShowId = null;
+      }
+      activeShows.delete(showId);
+      broadcastState();
+      saveData();
+    }, def.durationMs + 4500);
+  });
+
+  socket.on('performCheer', (payload) => {
+    const p = online.get(socket.id);
+    if (!p || p.escaped || p.released) return;
+    const showId = String((payload && payload.showId) || '').trim();
+    const show = activeShows.get(showId);
+    if (!show || Date.now() > show.until) {
+      socket.emit('errorMsg', 'Buổi biểu diễn đã kết thúc.');
+      return;
+    }
+    if (show.performerId === p.id) {
+      socket.emit('errorMsg', 'Không thể tự cổ vũ mình.');
+      return;
+    }
+    if (show.cheers.has(p.id)) {
+      socket.emit('errorMsg', 'Bạn đã cổ vũ buổi này rồi.');
+      return;
+    }
+    if (show.cheers.size >= performLib.MAX_CHEERS) {
+      socket.emit('errorMsg', 'Đã đủ tiếng vỗ tay rồi!');
+      return;
+    }
+    const d2 = performLib.dist2(p.x, p.z, show.x, show.z);
+    if (d2 > performLib.CHEER_RADIUS * performLib.CHEER_RADIUS) {
+      socket.emit('errorMsg', 'Lại gần hơn để cổ vũ!');
+      return;
+    }
+    const now = Date.now();
+    if ((p.cooldowns.cheer || 0) > now) {
+      socket.emit('errorMsg', 'Cổ vũ hơi nhanh — chờ chút.');
+      return;
+    }
+    show.cheers.add(p.id);
+    p.cooldowns.cheer = now + 4000;
+    p.cheerCount = (p.cheerCount || 0) + 1;
+    p.rehabPoints = (p.rehabPoints || 0) + 1; // small reward for cheering
+    setEmote(p, 'wave', 2500);
+    unlockAchievements(p, socket);
+    socket.emit('actionResult', { kind: 'cheer', message: `👏 Bạn cổ vũ ${show.nick}! (+1 điểm tích cực)` });
+    const psock = io.sockets.sockets.get(show.performerId);
+    if (psock) {
+      psock.emit('performCheer', { showId, from: p.nickname, cheers: show.cheers.size });
+    }
+    io.emit('performCheerFx', { showId, x: show.x, z: show.z, from: p.nickname });
     emitSelf(socket, p);
     broadcastState();
   });
@@ -2270,6 +2617,7 @@ function posePayload(p) {
     appearance: p.appearance, emote: p.emote && Date.now() < p.emoteUntil ? p.emote : null,
     sleeping: !!p.sleeping,
     rankEmoji: rank.emoji, rankName: rank.name, rankId: rank.id,
+    showId: p.activeShowId || null,
   };
 }
 

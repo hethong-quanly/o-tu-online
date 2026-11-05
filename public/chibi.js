@@ -29,7 +29,7 @@ export function chibiUniformTexture(stripeId, number, kind /* shirt|pants */) {
   const isPolice = stripeId === 'police';
   const isBrown = stripeId === 'brown';
   const isBlue = stripeId === 'blue' || stripeId === 'blue_white';
-  const light = isPolice ? '#2f6a36' : (isBlue ? '#eef4ff' : (isOrange ? '#ff8c28' : (isBrown ? '#9a6430' : '#f7f7f7')));
+  const light = isPolice ? '#2f6a36' : (isBlue ? '#eef4ff' : (isOrange ? '#FF6A00' : (isBrown ? '#9a6430' : '#f7f7f7')));
   const dark = isPolice ? '#1a3a1c' : (isBlue ? '#1a4a70' : (isOrange ? '#d85810' : (isBrown ? '#5c3818' : '#1a1a1a')));
   return makeTex((ctx, w, h) => {
     if (isOrange || isBrown || isPolice) {
@@ -214,7 +214,7 @@ export function createChibiCharacter(appearance, opts) {
   body.name = 'torso';
   // collar
   addMesh(torso, new THREE.TorusGeometry(0.16, 0.035, 8, 16),
-    matColor(isPolice ? 0x1a3a1c : (stripeId === 'orange' ? 0xffaa55 : (stripeId === 'brown' ? 0x7a4a20 : 0xdddddd))),
+    matColor(isPolice ? 0x1a3a1c : (stripeId === 'orange' ? 0xFF6A00 : (stripeId === 'brown' ? 0x7a4a20 : 0xdddddd))),
     0, 0.52, 0.02).rotation.x = Math.PI / 2;
 
   // arms
