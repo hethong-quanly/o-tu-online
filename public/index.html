@@ -2,7 +2,7 @@
 <html lang="vi">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1, user-scalable=no" />
   <meta name="theme-color" content="#0d0907" />
   <title>Ở tù online</title>
   <meta name="mobile-web-app-capable" content="yes" />
@@ -19,20 +19,36 @@
   <link rel="stylesheet" href="/style.css" />
 </head>
 <body>
-  <canvas id="yard" tabindex="0" role="img" aria-label="Sân trại giam — bản đồ nhiều phòng"></canvas>
+  <canvas id="yard" tabindex="0" role="img" aria-label="Trại giam 3D"></canvas>
   <div id="nametags" aria-hidden="true"></div>
   <div class="vignette" aria-hidden="true"></div>
 
+  <div id="joystick" class="joystick" hidden aria-hidden="true">
+    <div class="joy-base"><div class="joy-knob" id="joy-knob"></div></div>
+  </div>
+
   <section id="join-screen" class="overlay-panel" aria-labelledby="join-h">
-    <div class="panel-card join-card">
+    <div class="panel-card join-card login-card">
       <div class="lotus-ish" aria-hidden="true">⛓️</div>
       <h1 id="join-h">Ở tù online</h1>
-      <p class="sub">Sinh hoạt trong trại · Caro · Kéo Búa Bao · Nhiều người chơi</p>
-      <label class="lbl" for="nick">Biệt danh tù nhân</label>
+      <p class="sub">Trại giam 3D · Cải tạo · Caro · Kéo Búa Bao</p>
+
+      <label class="lbl" for="fullName">Họ và tên</label>
+      <input id="fullName" maxlength="40" autocomplete="name" placeholder="VD: Nguyễn Văn Sọc" />
+
+      <label class="lbl" for="nick">Biệt danh trong trại</label>
       <div class="ten">
         <input id="nick" maxlength="16" autocomplete="nickname" placeholder="VD: Tí Sắt" />
         <span class="dem" id="nick-dem">0/16</span>
       </div>
+
+      <label class="lbl" for="crime">Tội danh (hài hước)</label>
+      <select id="crime"></select>
+      <input id="crimeCustom" maxlength="48" placeholder="Tự khai tội danh…" hidden />
+
+      <label class="lbl" for="sentence">Thời hạn tù</label>
+      <select id="sentence"></select>
+
       <div class="appear">
         <div class="appear-row">
           <span class="lbl">Màu da</span>
@@ -48,8 +64,20 @@
         </div>
         <canvas id="preview-char" width="96" height="120" aria-hidden="true"></canvas>
       </div>
-      <p class="ghi">Tài khoản khách lưu trên trình duyệt. Tù nhân áo sọc; quản trại mặc đồ cảnh sát VN.</p>
-      <button id="btn-join" class="btn pri big" type="button">Vào trại</button>
+
+      <div class="profile-preview" id="profile-preview">
+        <div class="pcard">
+          <div class="pcard-h">THẺ TÙ NHÂN</div>
+          <div class="pcard-row"><span>Số hiệu</span><b id="pv-no">OT-????</b></div>
+          <div class="pcard-row"><span>Họ tên</span><b id="pv-name">—</b></div>
+          <div class="pcard-row"><span>Tội danh</span><b id="pv-crime">—</b></div>
+          <div class="pcard-row"><span>Án</span><b id="pv-sent">—</b></div>
+          <div class="pcard-row"><span>Xếp loại</span><b id="pv-rate">Kém</b></div>
+        </div>
+      </div>
+
+      <p class="ghi">Tài khoản khách lưu trên trình duyệt. Làm thành tích để giảm án &amp; mãn hạn sớm.</p>
+      <button id="btn-join" class="btn pri big" type="button">Nhập trại</button>
       <p id="join-error" class="error" role="alert"></p>
     </div>
   </section>
@@ -64,6 +92,7 @@
       <div class="sub" id="room-label">Phòng A</div>
     </div>
     <div class="tools">
+      <button class="ibtn" id="btn-panel-profile" type="button" title="Hồ sơ" aria-label="Hồ sơ">🪪</button>
       <button class="ibtn" id="btn-panel-stats" type="button" title="Trạng thái" aria-label="Trạng thái">❤️</button>
       <button class="ibtn" id="btn-panel-chat" type="button" title="Chat" aria-label="Chat">💬</button>
       <div class="pill nick-pill"><span class="txt" id="my-nick">—</span></div>
@@ -79,7 +108,8 @@
       <span class="cham"></span>
       <div class="goc-chu">
         <div class="goc-chinh" id="stat-money-line">💰 50</div>
-        <div class="goc-phu" id="stat-bars-line">❤️ 100 · ⚡ 100 · ⭐ 0</div>
+        <div class="goc-phu" id="stat-bars-line">❤️ 100 · ⚡ 100</div>
+        <div class="goc-phu" id="stat-sentence-line">⚖️ Án còn — · 🏅 Kém</div>
       </div>
     </div>
   </div>
@@ -97,7 +127,7 @@
     <button class="btn le" type="button" data-open="jobs"><span class="ico">🛠️</span><span class="le-ten">Làm việc</span></button>
     <button class="btn le" type="button" data-open="games"><span class="ico">🎮</span><span class="le-ten">Trò chơi</span></button>
     <button class="btn pri big" id="btn-escape" type="button">🏃 Vượt ngục</button>
-    <button class="btn le" type="button" data-open="board"><span class="ico">🏆</span><span class="le-ten">BXH</span></button>
+    <button class="btn le" type="button" data-open="achievements"><span class="ico">🏅</span><span class="le-ten">Thành tích</span></button>
     <button class="btn le" type="button" data-open="more"><span class="ico">⋯</span><span class="le-ten">Thêm</span></button>
   </nav>
 
@@ -109,7 +139,7 @@
   </aside>
 
   <div class="toast" id="toast" role="status"></div>
-  <p class="hint-move" id="hint-move" hidden>Chạm phòng để đi · WASD/phím mũi tên xem bản đồ · −3⚡</p>
+  <p class="hint-move" id="hint-move" hidden>WASD / joystick / chạm sàn để đi · 3D</p>
 
   <div id="invite-toast" class="invite-toast" hidden></div>
 
@@ -125,8 +155,10 @@
     </div>
   </div>
 
+  <script src="/vendor/three.min.js"></script>
   <script src="/socket.io/socket.io.js"></script>
   <script src="/sprites.js"></script>
+  <script src="/world3d.js"></script>
   <script src="/client.js"></script>
   <script>
     if ('serviceWorker' in navigator) {
