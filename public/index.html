@@ -3,52 +3,48 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1, user-scalable=no" />
-  <meta name="theme-color" content="#0d0907" />
+  <meta name="theme-color" content="#1a1a22" />
   <title>Ở tù online</title>
   <meta name="mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <meta name="apple-mobile-web-app-title" content="Ở tù online" />
-  <meta name="application-name" content="Ở tù online" />
   <link rel="manifest" href="/manifest.json" />
   <link rel="icon" type="image/png" sizes="48x48" href="/icons/icon-48.png" />
   <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
   <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Serif:wght@400;600;700&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@500;700;800&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/style.css" />
 </head>
 <body>
   <canvas id="yard" tabindex="0" role="img" aria-label="Trại giam 3D"></canvas>
   <div id="nametags" aria-hidden="true"></div>
-  <div class="vignette" aria-hidden="true"></div>
 
   <div id="joystick" class="joystick" hidden aria-hidden="true">
     <div class="joy-base"><div class="joy-knob" id="joy-knob"></div></div>
+  </div>
+  <div class="mob-actions" id="mob-actions" hidden>
+    <button type="button" class="mob-btn" id="mob-wave" title="Vẫy">👋</button>
+    <button type="button" class="mob-btn" id="mob-sit" title="Ngồi">🪑</button>
   </div>
 
   <section id="join-screen" class="overlay-panel" aria-labelledby="join-h">
     <div class="panel-card join-card login-card">
       <div class="lotus-ish" aria-hidden="true">⛓️</div>
       <h1 id="join-h">Ở tù online</h1>
-      <p class="sub">Trại giam 3D · Cải tạo · Caro · Kéo Búa Bao</p>
-
+      <p class="sub">Trại chibi 3D · Cải tạo · Caro · Kéo Búa Bao</p>
       <label class="lbl" for="fullName">Họ và tên</label>
       <input id="fullName" maxlength="40" autocomplete="name" placeholder="VD: Nguyễn Văn Sọc" />
-
       <label class="lbl" for="nick">Biệt danh trong trại</label>
       <div class="ten">
         <input id="nick" maxlength="16" autocomplete="nickname" placeholder="VD: Tí Sắt" />
         <span class="dem" id="nick-dem">0/16</span>
       </div>
-
       <label class="lbl" for="crime">Tội danh (hài hước)</label>
       <select id="crime"></select>
       <input id="crimeCustom" maxlength="48" placeholder="Tự khai tội danh…" hidden />
-
       <label class="lbl" for="sentence">Thời hạn tù</label>
       <select id="sentence"></select>
-
       <div class="appear">
         <div class="appear-row">
           <span class="lbl">Màu da</span>
@@ -59,12 +55,11 @@
           <div class="swatches" id="hair-swatches"></div>
         </div>
         <div class="appear-row">
-          <span class="lbl">Đồng phục sọc</span>
+          <span class="lbl">Đồng phục</span>
           <div class="swatches text" id="stripe-swatches"></div>
         </div>
         <canvas id="preview-char" width="96" height="120" aria-hidden="true"></canvas>
       </div>
-
       <div class="profile-preview" id="profile-preview">
         <div class="pcard">
           <div class="pcard-h">THẺ TÙ NHÂN</div>
@@ -75,60 +70,70 @@
           <div class="pcard-row"><span>Xếp loại</span><b id="pv-rate">Kém</b></div>
         </div>
       </div>
-
-      <p class="ghi">Tài khoản khách lưu trên trình duyệt. Làm thành tích để giảm án &amp; mãn hạn sớm.</p>
+      <p class="ghi">Làm thành tích để được đánh giá tốt &amp; giảm án. Tối đa 10.000 tù nhân.</p>
       <button id="btn-join" class="btn pri big" type="button">Nhập trại</button>
       <p id="join-error" class="error" role="alert"></p>
     </div>
   </section>
 
-  <header class="topbar" id="topbar" hidden>
-    <div class="pill" id="pill-online" title="Đang online">
-      <span class="dot"></span>
-      <span class="txt" id="online-count">0 online</span>
-    </div>
-    <div class="ttl">
-      <h1>Ở tù online</h1>
-      <div class="sub" id="room-label">Phòng A</div>
-    </div>
-    <div class="tools">
-      <button class="ibtn" id="btn-panel-profile" type="button" title="Hồ sơ" aria-label="Hồ sơ">🪪</button>
-      <button class="ibtn" id="btn-panel-stats" type="button" title="Trạng thái" aria-label="Trạng thái">❤️</button>
-      <button class="ibtn" id="btn-panel-chat" type="button" title="Chat" aria-label="Chat">💬</button>
-      <div class="pill nick-pill"><span class="txt" id="my-nick">—</span></div>
-    </div>
-  </header>
+  <!-- Top-left info card -->
+  <aside class="info-card" id="info-card" hidden>
+    <div class="info-title">Ở tù online</div>
+    <div class="info-line" id="info-time">--:-- · Giờ tự do</div>
+    <div class="info-line" id="info-online">👤 0 thật · 🤖 0 NPC</div>
+    <div class="info-line" id="info-days">✏️ Đã gạch: 0 ngày</div>
+    <div class="info-line" id="info-room">🚪 Phòng của bạn: —</div>
+    <div class="info-line accent" id="info-sentence">⚖️ Còn — ngày · 🏅 Kém</div>
+  </aside>
 
-  <div class="schedule-banner" id="schedule-banner" hidden>
-    <span id="schedule-text">—</span>
+  <!-- Top-right tools -->
+  <div class="top-tools" id="top-tools" hidden>
+    <button type="button" class="tbtn" id="btn-music" title="Nhạc">🎵</button>
+    <button type="button" class="tbtn" id="btn-sfx" title="SFX">🔊</button>
+    <button type="button" class="tbtn" id="btn-night" title="Đêm/ngày">🌙</button>
+    <button type="button" class="tbtn" id="btn-shadows" title="Đổ bóng">💡</button>
+    <button type="button" class="tbtn" id="btn-fs" title="Toàn màn hình">⛶</button>
+    <button type="button" class="tbtn" id="btn-help" title="Hướng dẫn">❓</button>
   </div>
 
-  <div class="hud-left" id="hud-left" hidden>
-    <div class="goc">
-      <span class="cham"></span>
-      <div class="goc-chu">
-        <div class="goc-chinh" id="stat-money-line">💰 50</div>
-        <div class="goc-phu" id="stat-bars-line">❤️ 100 · ⚡ 100</div>
-        <div class="goc-phu" id="stat-sentence-line">⚖️ Án còn — · 🏅 Kém</div>
-      </div>
-    </div>
-  </div>
+  <div class="welcome-banner" id="welcome-banner" hidden></div>
+  <div class="schedule-banner" id="schedule-banner" hidden><span id="schedule-text">—</span></div>
 
-  <nav class="actbar" id="actbar" hidden aria-label="Sinh hoạt">
-    <button class="btn le" type="button" data-act="sit"><span class="ico">🪑</span><span class="le-ten">Ngồi</span></button>
-    <button class="btn le" type="button" data-act="pushup"><span class="ico">🏋️</span><span class="le-ten">Hít đất</span></button>
-    <button class="btn le" type="button" data-act="wave"><span class="ico">👋</span><span class="le-ten">Vẫy tay</span></button>
-    <button class="btn le" type="button" data-act="mark_day"><span class="ico">✏️</span><span class="le-ten">Gạch ngày</span></button>
-    <button class="btn le" type="button" data-act="letter"><span class="ico">✉️</span><span class="le-ten">Viết thư</span></button>
-    <button class="btn le" type="button" data-act="sleep"><span class="ico">🛏️</span><span class="le-ten">Về phòng</span></button>
+  <!-- Chat panel (collapsible) -->
+  <section class="chat-panel" id="chat-panel" hidden>
+    <div class="chat-tabs">
+      <button type="button" class="ctab on" data-tab="all">Toàn trại</button>
+      <button type="button" class="ctab" data-tab="pm">Tin nhắn riêng</button>
+      <button type="button" class="ctab" data-tab="match">Trận đấu</button>
+      <button type="button" class="chat-min" id="chat-toggle" aria-label="Thu gọn">▾</button>
+    </div>
+    <div class="chat-log" id="chat-log"></div>
+    <form class="chat-form" id="chat-form">
+      <input id="chat-input" maxlength="120" placeholder="Nhập tin nhắn…" autocomplete="off" />
+      <button class="btn pri sm" type="submit">Gửi</button>
+    </form>
+  </section>
+  <button type="button" class="chat-fab" id="chat-fab" hidden title="Chat">💬</button>
+
+  <!-- Bottom action dock -->
+  <nav class="dock" id="dock" hidden aria-label="Hành động">
+    <button type="button" data-act="sit"><span>🪑</span><small>Ngồi</small></button>
+    <button type="button" data-act="wave"><span>👋</span><small>Vẫy tay</small></button>
+    <button type="button" data-act="pushup"><span>🏋️</span><small>Hít đất</small></button>
+    <button type="button" data-act="letter"><span>✉️</span><small>Viết thư</small></button>
+    <button type="button" data-act="mark_day"><span>✏️</span><small>Gạch</small></button>
+    <button type="button" id="dock-chat"><span>💬</span><small>Chat</small></button>
+    <button type="button" data-act="sleep"><span>🛏️</span><small>Về phòng</small></button>
   </nav>
 
-  <nav class="botbar" id="botbar" hidden aria-label="Hành động">
-    <button class="btn le" type="button" data-open="jobs"><span class="ico">🛠️</span><span class="le-ten">Làm việc</span></button>
-    <button class="btn le" type="button" data-open="games"><span class="ico">🎮</span><span class="le-ten">Trò chơi</span></button>
-    <button class="btn pri big" id="btn-escape" type="button">🏃 Vượt ngục</button>
-    <button class="btn le" type="button" data-open="achievements"><span class="ico">🏅</span><span class="le-ten">Thành tích</span></button>
-    <button class="btn le" type="button" data-open="more"><span class="ico">⋯</span><span class="le-ten">Thêm</span></button>
+  <!-- Right vertical menu -->
+  <nav class="right-menu" id="right-menu" hidden>
+    <button type="button" data-open="games"><span>🎮</span> Trò chơi</button>
+    <button type="button" data-open="board"><span>🏆</span> BXH</button>
+    <button type="button" data-open="achievements"><span>🏅</span> Vinh danh</button>
+    <button type="button" data-open="profile"><span>🪪</span> Khoe</button>
+    <button type="button" data-open="jobs"><span>🛠️</span> Làm việc</button>
+    <button type="button" data-open="more"><span>⋯</span> Thêm</button>
   </nav>
 
   <aside class="sidebang" id="sidebang" hidden>
@@ -139,14 +144,28 @@
   </aside>
 
   <div class="toast" id="toast" role="status"></div>
-  <p class="hint-move" id="hint-move" hidden>WASD / joystick / chạm sàn để đi · 3D</p>
-
   <div id="invite-toast" class="invite-toast" hidden></div>
+
+  <div id="help-modal" class="overlay-panel" hidden>
+    <div class="panel-card help-card">
+      <h2>Hướng dẫn</h2>
+      <ul class="help-list">
+        <li><b>Di chuyển:</b> WASD / phím mũi tên, chạm sàn, hoặc joystick trên điện thoại.</li>
+        <li><b>Camera:</b> Kéo chuột / chạm-kéo để xoay · lăn chuột để zoom.</li>
+        <li><b>Sinh hoạt:</b> Ngồi (căn tin), hít đất, vẫy tay, gạch ngày, viết thư, về phòng ngủ.</li>
+        <li><b>Trò chơi:</b> Caro &amp; Kéo Búa Bao với NPC hoặc người chơi (tên xanh).</li>
+        <li><b>Cải tạo:</b> Làm việc, đúng lịch loa trại, thắng game, viết thư → điểm cải tạo → giảm án.</li>
+        <li><b>Vượt ngục:</b> phải <b>hối lộ cán bộ</b> (tiền trong game) để họ quay đi ~28s; không hối lộ gần như chắc bị bắt. Thất bại = +15 ngày án.</li>
+        <li><b>Âm thanh:</b> nhạc nền / SFX (nút góc phải). Trên điện thoại cần chạm 1 lần để bật loa.</li>
+        <li><b>Mãn hạn</b> = lễ ra tù + BXH ra tù sớm.</li>
+      </ul>
+      <button id="btn-help-ok" class="btn pri big" type="button">Đã hiểu</button>
+    </div>
+  </div>
 
   <div id="match-overlay" class="overlay-panel" hidden>
     <div class="panel-card match-card" id="match-card"></div>
   </div>
-
   <div id="escape-overlay" class="overlay-panel" hidden>
     <div class="panel-card">
       <h2 id="escape-title">—</h2>
@@ -158,6 +177,7 @@
   <script src="/vendor/three.min.js"></script>
   <script src="/socket.io/socket.io.js"></script>
   <script src="/sprites.js"></script>
+  <script src="/audio.js"></script>
   <script src="/world3d.js"></script>
   <script src="/client.js"></script>
   <script>
