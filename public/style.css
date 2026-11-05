@@ -276,3 +276,81 @@ input, textarea { -webkit-user-select: text; user-select: text; touch-action: au
 @media (display-mode: standalone), (display-mode: fullscreen) {
   .topbar { padding-top: calc(14px + env(safe-area-inset-top)); }
 }
+
+/* Character create */
+.appear { margin: 14px 0 8px; text-align: left; }
+.appear-row { margin-bottom: 10px; }
+.appear .lbl { display: block; font-size: 12px; color: var(--text-dim); margin-bottom: 6px; }
+.swatches { display: flex; flex-wrap: wrap; gap: 8px; }
+.swatches .sw {
+  width: 28px; height: 28px; border-radius: 50%; border: 2px solid transparent;
+  cursor: pointer; padding: 0;
+}
+.swatches .sw.on { border-color: var(--gold); box-shadow: 0 0 0 2px rgba(212,168,87,0.35); }
+.swatches.text .sw {
+  width: auto; height: auto; border-radius: 999px; padding: 6px 10px;
+  background: rgba(24,17,12,0.9); color: var(--gold-light); font-size: 12px;
+  border: 1px solid var(--line);
+}
+#preview-char {
+  display: block; margin: 12px auto 0; background: rgba(0,0,0,0.25);
+  border-radius: 12px; border: 1px solid var(--line);
+}
+
+.schedule-banner {
+  position: fixed; z-index: 22; left: 50%; transform: translateX(-50%);
+  top: calc(58px + env(safe-area-inset-top));
+  max-width: min(520px, calc(100vw - 24px));
+  padding: 8px 14px; border-radius: 999px;
+  background: rgba(24,17,12,0.88); border: 1px solid var(--line);
+  color: var(--gold-light); font-size: 13px; text-align: center;
+  pointer-events: none;
+}
+
+.actbar {
+  position: fixed; z-index: 19; left: 50%; transform: translateX(-50%);
+  bottom: calc(86px + var(--safe-b));
+  display: flex; gap: 4px; max-width: calc(100vw - 16px); overflow-x: auto;
+  padding: 6px; border-radius: 14px; border: 1px solid rgba(212,168,87,0.22);
+  background: rgba(18,12,8,0.78); backdrop-filter: blur(6px);
+}
+.actbar .btn.le { min-width: 56px; min-height: 52px; padding: 4px; }
+.actbar .le-ten { font-size: 10.5px; }
+
+.match-card { width: min(440px, calc(100vw - 28px)); max-height: calc(100vh - 80px); overflow: auto; }
+.caro-board {
+  display: grid; grid-template-columns: repeat(15, 1fr); gap: 1px;
+  background: #3a2e24; border: 2px solid var(--line); border-radius: 8px;
+  width: 100%; aspect-ratio: 1; touch-action: manipulation;
+}
+.caro-cell {
+  background: #cbb07a; border: 0; padding: 0; cursor: pointer;
+  font-size: clamp(8px, 2.2vw, 14px); font-weight: 700; color: #1a120c;
+}
+.caro-cell:disabled { cursor: default; opacity: 0.95; }
+.rps-row { display: flex; gap: 10px; justify-content: center; margin: 14px 0; flex-wrap: wrap; }
+.rps-row .btn { min-width: 88px; min-height: 64px; flex-direction: column; }
+.invite-toast {
+  position: fixed; z-index: 40; left: 50%; bottom: calc(160px + var(--safe-b));
+  transform: translateX(-50%); width: min(360px, calc(100vw - 24px));
+  padding: 14px; border-radius: 14px; background: var(--panel); border: 1px solid var(--line);
+  box-shadow: 0 12px 40px rgba(0,0,0,0.5);
+}
+.invite-toast .row { display: flex; gap: 8px; margin-top: 10px; }
+.letter-item {
+  padding: 10px 0; border-bottom: 1px solid rgba(212,168,87,0.15); font-size: 13px;
+}
+.letter-item .who { color: var(--gold); font-weight: 600; }
+.letter-form { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
+.letter-form textarea {
+  min-height: 72px; border-radius: 12px; border: 1px solid var(--line);
+  background: #120e0a; color: var(--text); padding: 10px; font: inherit; resize: vertical;
+}
+.game-pick { display: flex; flex-direction: column; gap: 10px; }
+.player-pick { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.player-pick .btn { font-size: 12px; min-height: 36px; padding: 0 10px; }
+
+@media (max-width: 560px) {
+  .actbar { bottom: calc(78px + var(--safe-b)); }
+  .botbar .btn.pri.big { font-size: 13px; padding: 0 10px; }
+}

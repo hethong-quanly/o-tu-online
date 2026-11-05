@@ -19,29 +19,41 @@
   <link rel="stylesheet" href="/style.css" />
 </head>
 <body>
-  <!-- Full-screen prison yard -->
   <canvas id="yard" tabindex="0" role="img" aria-label="Sân trại giam — bản đồ nhiều phòng"></canvas>
   <div id="nametags" aria-hidden="true"></div>
   <div class="vignette" aria-hidden="true"></div>
 
-  <!-- Join / character intro (similar layout pattern to reference: centered panel) -->
   <section id="join-screen" class="overlay-panel" aria-labelledby="join-h">
     <div class="panel-card join-card">
       <div class="lotus-ish" aria-hidden="true">⛓️</div>
       <h1 id="join-h">Ở tù online</h1>
-      <p class="sub">Mô phỏng đời sống trong tù · Nhiều người chơi</p>
+      <p class="sub">Sinh hoạt trong trại · Caro · Kéo Búa Bao · Nhiều người chơi</p>
       <label class="lbl" for="nick">Biệt danh tù nhân</label>
       <div class="ten">
         <input id="nick" maxlength="16" autocomplete="nickname" placeholder="VD: Tí Sắt" />
         <span class="dem" id="nick-dem">0/16</span>
       </div>
-      <p class="ghi">Người khác chỉ thấy biệt danh và hình tù nhân áo sọc. Quản trại (NPC) tuần tra sân.</p>
+      <div class="appear">
+        <div class="appear-row">
+          <span class="lbl">Màu da</span>
+          <div class="swatches" id="skin-swatches"></div>
+        </div>
+        <div class="appear-row">
+          <span class="lbl">Màu tóc</span>
+          <div class="swatches" id="hair-swatches"></div>
+        </div>
+        <div class="appear-row">
+          <span class="lbl">Đồng phục sọc</span>
+          <div class="swatches text" id="stripe-swatches"></div>
+        </div>
+        <canvas id="preview-char" width="96" height="120" aria-hidden="true"></canvas>
+      </div>
+      <p class="ghi">Tài khoản khách lưu trên trình duyệt. Tù nhân áo sọc; quản trại mặc đồ cảnh sát VN.</p>
       <button id="btn-join" class="btn pri big" type="button">Vào trại</button>
       <p id="join-error" class="error" role="alert"></p>
     </div>
   </section>
 
-  <!-- Top bar -->
   <header class="topbar" id="topbar" hidden>
     <div class="pill" id="pill-online" title="Đang online">
       <span class="dot"></span>
@@ -58,7 +70,10 @@
     </div>
   </header>
 
-  <!-- Left status chip -->
+  <div class="schedule-banner" id="schedule-banner" hidden>
+    <span id="schedule-text">—</span>
+  </div>
+
   <div class="hud-left" id="hud-left" hidden>
     <div class="goc">
       <span class="cham"></span>
@@ -69,16 +84,23 @@
     </div>
   </div>
 
-  <!-- Bottom action bar -->
-  <nav class="botbar" id="botbar" hidden aria-label="Hành động">
-    <button class="btn le" type="button" data-open="jobs"><span class="ico">🛠️</span><span class="le-ten">Làm việc</span></button>
-    <button class="btn le" type="button" data-open="shop"><span class="ico">🛒</span><span class="le-ten">Cửa hàng</span></button>
-    <button class="btn pri big" id="btn-escape" type="button">🏃 Vượt ngục</button>
-    <button class="btn le" type="button" data-open="board"><span class="ico">🏆</span><span class="le-ten">BXH</span></button>
-    <button class="btn le" type="button" data-open="help"><span class="ico">ℹ️</span><span class="le-ten">Gợi ý</span></button>
+  <nav class="actbar" id="actbar" hidden aria-label="Sinh hoạt">
+    <button class="btn le" type="button" data-act="sit"><span class="ico">🪑</span><span class="le-ten">Ngồi</span></button>
+    <button class="btn le" type="button" data-act="pushup"><span class="ico">🏋️</span><span class="le-ten">Hít đất</span></button>
+    <button class="btn le" type="button" data-act="wave"><span class="ico">👋</span><span class="le-ten">Vẫy tay</span></button>
+    <button class="btn le" type="button" data-act="mark_day"><span class="ico">✏️</span><span class="le-ten">Gạch ngày</span></button>
+    <button class="btn le" type="button" data-act="letter"><span class="ico">✉️</span><span class="le-ten">Viết thư</span></button>
+    <button class="btn le" type="button" data-act="sleep"><span class="ico">🛏️</span><span class="le-ten">Về phòng</span></button>
   </nav>
 
-  <!-- Side panel -->
+  <nav class="botbar" id="botbar" hidden aria-label="Hành động">
+    <button class="btn le" type="button" data-open="jobs"><span class="ico">🛠️</span><span class="le-ten">Làm việc</span></button>
+    <button class="btn le" type="button" data-open="games"><span class="ico">🎮</span><span class="le-ten">Trò chơi</span></button>
+    <button class="btn pri big" id="btn-escape" type="button">🏃 Vượt ngục</button>
+    <button class="btn le" type="button" data-open="board"><span class="ico">🏆</span><span class="le-ten">BXH</span></button>
+    <button class="btn le" type="button" data-open="more"><span class="ico">⋯</span><span class="le-ten">Thêm</span></button>
+  </nav>
+
   <aside class="sidebang" id="sidebang" hidden>
     <button class="ibtn x" id="side-x" type="button" aria-label="Đóng">×</button>
     <h2 class="bang-tt" id="side-title">—</h2>
@@ -87,7 +109,13 @@
   </aside>
 
   <div class="toast" id="toast" role="status"></div>
-  <p class="hint-move" id="hint-move" hidden>Chạm / click phòng trên bản đồ để di chuyển · −3⚡</p>
+  <p class="hint-move" id="hint-move" hidden>Chạm phòng để đi · WASD/phím mũi tên xem bản đồ · −3⚡</p>
+
+  <div id="invite-toast" class="invite-toast" hidden></div>
+
+  <div id="match-overlay" class="overlay-panel" hidden>
+    <div class="panel-card match-card" id="match-card"></div>
+  </div>
 
   <div id="escape-overlay" class="overlay-panel" hidden>
     <div class="panel-card">
@@ -100,7 +128,6 @@
   <script src="/socket.io/socket.io.js"></script>
   <script src="/sprites.js"></script>
   <script src="/client.js"></script>
-
   <script>
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {
