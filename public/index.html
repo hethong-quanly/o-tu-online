@@ -29,11 +29,26 @@
     <button type="button" class="mob-btn" id="mob-sit" title="Ngồi">🪑</button>
   </div>
 
+  <!-- Compact always-on HUD (mobile) + chrome toggle FABs -->
+  <div id="compact-hud" class="compact-hud" hidden>
+    <span id="chud-time">--:--</span>
+    <span id="chud-sent">⚖️ —</span>
+    <span id="chud-online">👤 0</span>
+  </div>
+  <div id="ui-fabs" class="ui-fabs" hidden>
+    <button type="button" class="ui-fab" data-ui="stats" title="Thông tin" aria-label="Thông tin">📊</button>
+    <button type="button" class="ui-fab" data-ui="tools" title="Công cụ" aria-label="Công cụ">⚙️</button>
+    <button type="button" class="ui-fab" data-ui="menu" title="Menu" aria-label="Menu">☰</button>
+    <button type="button" class="ui-fab" data-ui="dock" title="Hành động" aria-label="Hành động">✋</button>
+    <button type="button" class="ui-fab" data-ui="chat" title="Chat" aria-label="Chat">💬</button>
+    <button type="button" class="ui-fab" data-ui="minimap" title="Minimap" aria-label="Minimap">🗺️</button>
+  </div>
+
   <section id="join-screen" class="overlay-panel" aria-labelledby="join-h">
     <div class="panel-card join-card login-card">
       <div class="lotus-ish" aria-hidden="true">⛓️</div>
       <h1 id="join-h">Ở tù online</h1>
-      <p class="sub">Trại 3D v9 · Đồng phục theo quốc gia · Nam/Nữ/LGBT · Quản giáo</p>
+      <p class="sub">Trại 3D v10 · Chibi · Đồng phục quốc gia · Nam/Nữ/LGBT · Quản giáo</p>
       <label class="lbl" for="fullName">Họ và tên</label>
       <input id="fullName" maxlength="40" autocomplete="name" placeholder="VD: Nguyễn Văn Sọc" />
       <label class="lbl" for="nick">Biệt danh trong trại</label>
@@ -214,7 +229,7 @@
       <h2>🎨 Credits / Giấy phép tài nguyên</h2>
       <p class="meta">3D assets (CC0 / attribution). Chi tiết đầy đủ: <code>ASSETS_LICENSES.md</code></p>
       <div id="credits-body" style="text-align:left;font-size:13px;line-height:1.45">
-        <p><b>Characters</b> — Quaternius <i>Ultimate Modular Men</i> + <i>Ultimate Modular Women</i> (CC0): Idle/Walk/Run/Wave/Interact. Canvas fabric uniforms by country (VN vertical B/W, US orange, CN blue/white, other brown); VN police green + peaked cap for guards. Gender: Nam / Nữ / LGBT.</p>
+        <p><b>Characters</b> — Quaternius <i>Ultimate Modular Men</i> + <i>Ultimate Modular Women</i> (CC0): Idle/Walk/Run/Wave/Interact. Cute procedural chibi characters (mobile-safe). Uniforms by country (VN vertical B/W, US orange, CN blue/white, other brown); VN police green + peaked cap for guards. Gender: Nam / Nữ / LGBT.</p>
         <p><b>Props / furniture / kitchen / garden / tools</b> — Kenney.nl CC0 (Furniture Kit, Food Kit, Nature Kit, etc.) via public mirrors.</p>
         <p><b>Engine</b> — Three.js (MIT). Draco decoder — Google Draco (Apache-2.0).</p>
         <p>Gameplay art fallback: procedural meshes if GLB fails to load. No Mixamo assets shipped (redistribution limits).</p>
@@ -259,7 +274,9 @@
   <script>
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {
-        navigator.serviceWorker.register('/sw.js').catch(() => {});
+        navigator.serviceWorker.register('/sw.js?v=3d-v10', { updateViaCache: 'none' })
+          .then((reg) => { try { reg.update(); } catch (_) {} })
+          .catch(() => {});
       });
     }
   </script>

@@ -1,6 +1,6 @@
-# ASSETS_LICENSES — Ở tù online 3d-v9
+## 3d-v10 — Procedural chibi characters
 
-All shipped 3D assets are free for commercial use. Prefer CC0. Gameplay code © project.
+Player/NPC bodies are **procedural Three.js chibi meshes** (original to this project) with canvas fabric uniforms. Quaternius Men/Women CC0 glTF remain under `public/assets/characters/` for props/fallback but v10 defaults player bodies to chibi so country uniforms always show on mobile.
 
 ## Summary
 

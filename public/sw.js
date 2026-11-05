@@ -1,11 +1,9 @@
-/* Ở tù online — lightweight offline shell (network-first for game API/socket) */
-const CACHE = 'otu-shell-v1';
+/* Ở tù online — shell SW (3d-v10). Network-first for JS/CSS so phones get new builds. */
+const CACHE = 'otu-shell-v10';
 const PRECACHE = [
   '/',
   '/index.html',
   '/style.css',
-  '/client.js',
-  '/sprites.js',
   '/manifest.json',
   '/icons/icon-192.png',
   '/icons/icon-512.png',
@@ -26,28 +24,38 @@ self.addEventListener('activate', (event) => {
   );
 });
 
+function isScriptOrStyle(url) {
+  return /\.(js|mjs|css)(\?|$)/i.test(url.pathname) || url.pathname === '/sw.js';
+}
+
 self.addEventListener('fetch', (event) => {
   const req = event.request;
   if (req.method !== 'GET') return;
   const url = new URL(req.url);
-  // Never cache socket.io / websocket upgrade
   if (url.pathname.startsWith('/socket.io')) return;
 
-  // HTML: network-first so deploys show up
-  if (req.mode === 'navigate' || (req.headers.get('accept') || '').includes('text/html')) {
+  // HTML + JS + CSS: network-first (bust stale mobile caches)
+  const netFirst = req.mode === 'navigate'
+    || (req.headers.get('accept') || '').includes('text/html')
+    || (url.origin === self.location.origin && isScriptOrStyle(url));
+
+  if (netFirst) {
     event.respondWith(
       fetch(req)
         .then((res) => {
-          const copy = res.clone();
-          caches.open(CACHE).then((c) => c.put('/index.html', copy));
+          if (res && res.ok && url.origin === self.location.origin) {
+            const copy = res.clone();
+            const key = req.mode === 'navigate' ? '/index.html' : req;
+            caches.open(CACHE).then((c) => c.put(key, copy)).catch(() => {});
+          }
           return res;
         })
-        .catch(() => caches.match('/index.html'))
+        .catch(() => caches.match(req).then((c) => c || caches.match('/index.html')))
     );
     return;
   }
 
-  // Static assets: stale-while-revalidate
+  // Other same-origin static: stale-while-revalidate
   if (url.origin === self.location.origin) {
     event.respondWith(
       caches.match(req).then((cached) => {
@@ -55,7 +63,7 @@ self.addEventListener('fetch', (event) => {
           .then((res) => {
             if (res && res.ok) {
               const copy = res.clone();
-              caches.open(CACHE).then((c) => c.put(req, copy));
+              caches.open(CACHE).then((c) => c.put(req, copy)).catch(() => {});
             }
             return res;
           })

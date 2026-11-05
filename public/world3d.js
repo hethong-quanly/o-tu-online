@@ -1,6 +1,7 @@
-/* 3d-v9 — country uniforms + gender bodies (Quaternius Men/Women CC0) + glTF/procedural */
+/* 3d-v10 — cute procedural chibi characters + country uniforms (mobile-safe) */
 import * as THREE from 'three';
 import { AssetLibrary } from './asset-lib.js';
+import { createChibiCharacter } from './chibi.js';
 
 
   const FUNNY_NPC_NAMES = [
@@ -309,7 +310,8 @@ import { AssetLibrary } from './asset-lib.js';
     return createCharacterSmart({ skin: '#e8b896', hair: '#1a1a1a', stripe: 'police' }, { npc: true, number: 'QG', role: 'guard' });
   }
 
-  /** Prefer glTF (AssetLibrary); fall back to procedural lively mesh. */
+  /** Always use cute procedural chibi so uniforms/faces work on mobile GPUs.
+   *  Quaternius glTF is kept for props via AssetLibrary, not player bodies. */
   function createCharacterSmart(appearance, opts) {
     opts = opts || {};
     appearance = appearance || {};
@@ -317,23 +319,14 @@ import { AssetLibrary } from './asset-lib.js';
     if (appearance.country && countryMap[appearance.country] && appearance.stripe !== 'police') {
       appearance = Object.assign({}, appearance, { stripe: countryMap[appearance.country] });
     }
-    const lib = window.__otuAssets;
-    if (lib && lib.ready) {
-      try {
-        const role = opts.role || (appearance.stripe === 'police' ? 'guard' : 'prisoner');
-        const g = lib.createCharacter(role === 'guard' ? 'guard' : 'prisoner', {
-          appearance,
-          number: opts.number || appearance.number,
-          stripe: appearance.stripe,
-          role,
-          shadows: !(window.__otuIsMobile),
-        });
-        if (g) {
-          g.userData.kind = role === 'guard' || appearance.stripe === 'police' ? 'guard' : 'prisoner';
-          return g;
-        }
-      } catch (e) { console.warn('gltf char fail', e); }
-    }
+    const role = opts.role || (appearance.stripe === 'police' ? 'guard' : 'prisoner');
+    try {
+      const g = createChibiCharacter(appearance, Object.assign({}, opts, { role }));
+      if (g) {
+        g.userData.kind = role === 'guard' || appearance.stripe === 'police' ? 'guard' : 'prisoner';
+        return g;
+      }
+    } catch (e) { console.warn('chibi fail', e); }
     return createProceduralPrisoner(appearance, opts);
   }
 

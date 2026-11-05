@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"/>
+<title>3d-v10 chibi uniforms</title>
+<style>
+  html,body{margin:0;background:#1a2228;color:#eee;font-family:system-ui,sans-serif;overflow:hidden}
+  #hud{position:fixed;left:10px;top:10px;z-index:2;background:rgba(0,0,0,.6);padding:8px 12px;border-radius:8px;font-size:13px}
+  canvas{display:block;width:100vw;height:100vh}
+</style>
+<script type="importmap">
+{"imports":{"three":"/vendor/three.module.js","three/addons/":"/vendor/jsm/"}}
+</script>
+</head>
+<body>
+<div id="hud">loading…</div>
+<script type="module">
+import * as THREE from 'three';
+import { createChibiCharacter } from '/chibi.js';
+
+const hud = document.getElementById('hud');
+const params = new URLSearchParams(location.search);
+const only = params.get('only');
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x2a3540);
+const camera = new THREE.PerspectiveCamera(42, innerWidth / innerHeight, 0.1, 100);
+camera.position.set(0, only != null ? 1.15 : 1.4, only != null ? 2.6 : (innerWidth < 500 ? 11.5 : 6.2));
+if (only == null && innerWidth < 500) camera.fov = 48; camera.updateProjectionMatrix();
+const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true, powerPreference: 'low-power' });
+renderer.setSize(innerWidth, innerHeight);
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+document.body.appendChild(renderer.domElement);
+scene.add(new THREE.AmbientLight(0xffffff, 0.95));
+const sun = new THREE.DirectionalLight(0xfff5e6, 0.9);
+sun.position.set(3, 7, 5);
+scene.add(sun);
+const ground = new THREE.Mesh(new THREE.CircleGeometry(8, 32), new THREE.MeshLambertMaterial({ color: 0x3a454f }));
+ground.rotation.x = -Math.PI / 2;
+scene.add(ground);
+
+const cast = [
+  { label: 'VN sọc dọc', appearance: { country: 'vn', gender: 'nam', skin: '#e8b896', hair: '#1a1a1a', hairStyle: 'default' }, number: 'VN1' },
+  { label: 'Mỹ cam', appearance: { country: 'us', gender: 'nam', skin: '#d4a070', hair: '#3a2a18', hairStyle: 'punk' }, number: 'US2' },
+  { label: 'TQ xanh', appearance: { country: 'cn', gender: 'nu', skin: '#f0c8a8', hair: '#1a1a1a', hairStyle: 'long', bodyStyle: 'female' }, number: 'CN3' },
+  { label: 'Khác nâu', appearance: { country: 'other', gender: 'nam', skin: '#c9956a', hair: '#2a2218' }, number: 'OT4' },
+  { label: 'LGBT', appearance: { country: 'vn', gender: 'lgbt', skin: '#e8b896', hair: '#4a2060', hairStyle: 'default', rainbowBadge: true }, number: 'LG5' },
+  { label: 'Quản giáo', appearance: { skin: '#e8b896', hair: '#1a1a1a', stripe: 'police', gender: 'nam' }, number: 'QG', role: 'guard' },
+];
+
+const root = new THREE.Group();
+scene.add(root);
+const labels = [];
+
+function makeLabel(text) {
+  const c = document.createElement('canvas');
+  c.width = 256; c.height = 64;
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = 'rgba(0,0,0,0.75)';
+  ctx.fillRect(8, 8, 240, 48);
+  ctx.fillStyle = '#fff';
+  ctx.font = 'bold 28px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText(text, 128, 42);
+  const tex = new THREE.CanvasTexture(c);
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(1.4, 0.35), new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false }));
+  return m;
+}
+
+const indices = only != null ? [Number(only)] : cast.map((_, i) => i);
+indices.forEach((i, slot) => {
+  const spec = cast[i];
+  if (!spec) return;
+  const ch = createChibiCharacter(spec.appearance, { number: spec.number, role: spec.role, expression: 'smile' });
+  const n = indices.length;
+  const gap = innerWidth < 500 ? 1.15 : 1.55;
+  const x = only != null ? 0 : (slot - (n - 1) / 2) * gap;
+  ch.position.set(x, 0, 0);
+  if (only == null && innerWidth < 500) ch.scale.setScalar(0.85);
+  ch.rotation.y = Math.PI * 0.12;
+  root.add(ch);
+  const lab = makeLabel(spec.label);
+  lab.position.set(x, 1.85, 0);
+  root.add(lab);
+  labels.push(lab);
+});
+
+hud.textContent = '3d-v10 · Chibi · VN / Mỹ / TQ / Khác / LGBT / Quản giáo';
+
+function frame(t) {
+  requestAnimationFrame(frame);
+  root.children.forEach((c) => {
+    if (c.userData && c.userData.chibi) {
+      c.rotation.y = Math.sin(t * 0.001 + c.position.x) * 0.25 + 0.15;
+      const limbs = c.userData.limbs;
+      if (limbs && limbs.armL) limbs.armL.rotation.x = Math.sin(t * 0.003) * 0.15;
+      if (limbs && limbs.armR) limbs.armR.rotation.x = -Math.sin(t * 0.003) * 0.15;
+    }
+  });
+  labels.forEach((l) => l.quaternion.copy(camera.quaternion));
+  renderer.render(scene, camera);
+}
+requestAnimationFrame(frame);
+addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+</script>
+</body>
+</html>

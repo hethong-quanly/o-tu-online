@@ -255,6 +255,7 @@
     const mm = $('#minimap');
     if (mm) mm.hidden = false;
     setupJoystick();
+    maybeUiShot();
     if (pendingMe) {
       world3d.setMe(pendingMe.id, pendingMe.appearance, pendingMe.x, pendingMe.z);
       pendingMe = null;
@@ -262,6 +263,45 @@
       world3d.setMe(me.id, me.appearance, me.x, me.z);
     }
     return world3d;
+  }
+
+
+  function maybeUiShot() {
+    const shot = new URLSearchParams(location.search).get('uiShot');
+    if (!shot) return;
+    document.body.classList.add('mobile-chrome');
+    const join = $('#join-screen'); if (join) join.hidden = true;
+    // Fake me for compact HUD
+    me = Object.assign({
+      id: 'shot', nickname: 'Chibi', fullName: 'UI Shot',
+      sentenceLeftDays: 28, sentenceTotalDays: 30, rehabRatingLabel: 'Kém', rehabPoints: 0,
+      daysMarked: 2, room: 'A1', role: 'prisoner', prisonerNo: 'OT-010',
+      rank: { emoji: '🐣', name: 'Tù mới', xp: 10 }, rankXp: 10,
+      appearance: { country: 'vn', gender: 'nam', skin: '#e8b896', hair: '#1a1a1a' },
+    }, me || {});
+    world.onlineCount = world.onlineCount || 3;
+    world.schedule = world.schedule || { name: 'Giờ tự do' };
+    showGameUI(true);
+    updateHud();
+    ['#intake-banner', '#audio-unlock', '#welcome-banner', '#schedule-banner'].forEach((s) => {
+      const el = $(s); if (el) el.hidden = true;
+    });
+    const yard = $('#yard');
+    if (yard) {
+      yard.style.background = 'linear-gradient(180deg,#7eb6e8 0%,#b8d4f0 40%,#6a8a5a 40%,#5a7a4a 100%)';
+    }
+    if (shot === 'expanded') {
+      ['stats', 'tools', 'menu', 'dock', 'chat', 'minimap'].forEach((k) => {
+        const el = $(UI_PANELS[k]);
+        if (el) { el.hidden = false; el.classList.add('ui-open'); }
+        const fab = $(`.ui-fab[data-ui="${k}"]`);
+        if (fab) fab.classList.add('on');
+      });
+      const mob = $('#mob-actions'); if (mob) { mob.hidden = false; mob.classList.add('ui-open'); }
+      const chat = $('#chat-panel'); if (chat) chat.classList.remove('collapsed');
+    } else {
+      collapseAllUI();
+    }
   }
 
   function setupJoystick() {
@@ -294,19 +334,119 @@
     root.addEventListener('touchcancel', end);
   }
 
+  function isMobileUI() {
+    return matchMedia('(max-width: 700px)').matches
+      || matchMedia('(pointer: coarse)').matches
+      || 'ontouchstart' in window
+      || /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent);
+  }
+
+  const UI_PANELS = {
+    stats: '#info-card',
+    tools: '#top-tools',
+    menu: '#right-menu',
+    dock: '#dock',
+    chat: '#chat-panel',
+    minimap: '#minimap',
+  };
+
+  function collapseAllUI(except) {
+    Object.keys(UI_PANELS).forEach((k) => {
+      if (except && k === except) return;
+      const el = $(UI_PANELS[k]);
+      if (el) el.classList.remove('ui-open');
+    });
+    const mob = $('#mob-actions');
+    if (mob && !(except === 'dock')) mob.classList.remove('ui-open');
+    $$('.ui-fab').forEach((b) => {
+      if (except && b.dataset.ui === except) return;
+      b.classList.remove('on');
+    });
+  }
+
+  function toggleUIPanel(key) {
+    const sel = UI_PANELS[key];
+    if (!sel) return;
+    const el = $(sel);
+    if (!el) return;
+    const open = !el.classList.contains('ui-open');
+    collapseAllUI(open ? key : null);
+    el.classList.toggle('ui-open', open);
+    el.hidden = false;
+    if (key === 'chat') {
+      el.classList.toggle('collapsed', !open);
+      if (open) el.classList.remove('collapsed');
+    }
+    if (key === 'dock') {
+      const mob = $('#mob-actions');
+      if (mob) { mob.hidden = false; mob.classList.toggle('ui-open', open); }
+    }
+    const fab = $(`.ui-fab[data-ui="${key}"]`);
+    if (fab) fab.classList.toggle('on', open);
+  }
+
+  function setupMobileChrome() {
+    const mobile = isMobileUI();
+    document.body.classList.toggle('mobile-chrome', mobile);
+    const fabs = $('#ui-fabs');
+    const chud = $('#compact-hud');
+    if (!mobile) {
+      if (fabs) fabs.hidden = true;
+      if (chud) chud.hidden = true;
+      Object.values(UI_PANELS).forEach((s) => { const el = $(s); if (el) el.classList.add('ui-open'); });
+      return;
+    }
+    if (fabs) fabs.hidden = false;
+    if (chud) chud.hidden = false;
+    // Default collapsed
+    collapseAllUI();
+    $$('.ui-fab').forEach((b) => {
+      b.onclick = (e) => {
+        e.stopPropagation();
+        unlockAudio();
+        toggleUIPanel(b.dataset.ui);
+      };
+    });
+    // Tap outside expanded panels → collapse
+    if (!setupMobileChrome._bound) {
+      setupMobileChrome._bound = true;
+      document.addEventListener('pointerdown', (e) => {
+        if (!document.body.classList.contains('mobile-chrome')) return;
+        const t = e.target;
+        if (!t) return;
+        if (t.closest && (
+          t.closest('#info-card') || t.closest('#top-tools') || t.closest('#right-menu')
+          || t.closest('#dock') || t.closest('#chat-panel') || t.closest('#minimap')
+          || t.closest('#ui-fabs') || t.closest('#joystick') || t.closest('#mob-actions')
+          || t.closest('#sidebang') || t.closest('.overlay-panel') || t.closest('#compact-hud')
+        )) return;
+        collapseAllUI();
+      }, true);
+    }
+  }
+
   function showGameUI(show) {
     ['#info-card', '#top-tools', '#dock', '#right-menu', '#chat-panel'].forEach((s) => { $(s).hidden = !show; });
-    const isTouch = matchMedia('(pointer: coarse)').matches || 'ontouchstart' in window || window.innerWidth < 700;
+    const mobile = isMobileUI();
     if (show) {
-      $('#joystick').hidden = !isTouch;
-      $('#mob-actions').hidden = !isTouch;
-      if (isTouch) {
+      $('#joystick').hidden = !mobile;
+      $('#mob-actions').hidden = !mobile;
+      setupMobileChrome();
+      if (mobile) {
         $('#chat-panel').classList.add('collapsed');
+        $('#chat-fab').hidden = true;
+        const mm = $('#minimap');
+        if (mm) { mm.hidden = false; mm.classList.remove('ui-open'); }
+      } else {
+        Object.values(UI_PANELS).forEach((s) => { const el = $(s); if (el) el.classList.add('ui-open'); });
       }
     } else {
       $('#joystick').hidden = true;
       $('#mob-actions').hidden = true;
       $('#chat-fab').hidden = true;
+      const fabs = $('#ui-fabs'); if (fabs) fabs.hidden = true;
+      const chud = $('#compact-hud'); if (chud) chud.hidden = true;
+      document.body.classList.remove('mobile-chrome');
     }
   }
 
@@ -317,6 +457,9 @@
     const mm = String(now.getMinutes()).padStart(2, '0');
     const schName = world.schedule ? world.schedule.name : 'Giờ tự do';
     $('#info-time').textContent = `${hh}:${mm} · ${schName}`;
+    const chudT = $('#chud-time'); if (chudT) chudT.textContent = `${hh}:${mm}`;
+    const chudS = $('#chud-sent'); if (chudS) chudS.textContent = `⚖️ ${me.sentenceLeftDays != null ? me.sentenceLeftDays : '—'}n`;
+    const chudO = $('#chud-online'); if (chudO) chudO.textContent = `👤 ${world.onlineCount || 0}`;
     const npc = world.npcCount != null ? world.npcCount : (config.npcCount || 16);
     $('#info-online').textContent = `👤 ${world.onlineCount || 0} thật · 🤖 ${npc} NPC`;
     $('#info-days').textContent = `✏️ Đã gạch: ${(world.totalDaysMarked || me.daysMarked || 0).toLocaleString('vi-VN')} ngày`;
@@ -745,10 +888,13 @@
     };
   });
   $('#dock-chat').onclick = () => {
-    const panel = $('#chat-panel');
-    panel.hidden = false;
-    panel.classList.toggle('collapsed');
-    $('#chat-fab').hidden = true;
+    if (document.body.classList.contains('mobile-chrome')) toggleUIPanel('chat');
+    else {
+      const panel = $('#chat-panel');
+      panel.hidden = false;
+      panel.classList.toggle('collapsed');
+      $('#chat-fab').hidden = true;
+    }
   };
   $$('#right-menu [data-open]').forEach((b) => b.onclick = () => openSide(b.dataset.open));
   $('#side-x').onclick = () => { $('#sidebang').hidden = true; sideMode = null; };
@@ -762,12 +908,16 @@
     renderChatLog();
   });
   $('#chat-toggle').onclick = () => {
-    $('#chat-panel').classList.toggle('collapsed');
+    if (document.body.classList.contains('mobile-chrome')) collapseAllUI();
+    else $('#chat-panel').classList.toggle('collapsed');
   };
   $('#chat-fab').onclick = () => {
-    $('#chat-panel').hidden = false;
-    $('#chat-panel').classList.remove('collapsed');
-    $('#chat-fab').hidden = true;
+    if (document.body.classList.contains('mobile-chrome')) toggleUIPanel('chat');
+    else {
+      $('#chat-panel').hidden = false;
+      $('#chat-panel').classList.remove('collapsed');
+      $('#chat-fab').hidden = true;
+    }
   };
   $('#chat-form').onsubmit = (e) => {
     e.preventDefault();
@@ -1129,6 +1279,12 @@
     $('#escape-title').textContent = r.early ? '🕊️ Ra tù sớm!' : '🕊️ Mãn hạn';
     $('#escape-detail').textContent = `${r.message}\nĐã ở ${r.daysServed}/${r.sentenceTotalDays} ngày in-game.`;
   });
+
+
+  // Screenshot / QA: ?uiShot=collapsed|expanded forces mobile chrome without joining
+  if (new URLSearchParams(location.search).get('uiShot')) {
+    setTimeout(() => { try { maybeUiShot(); } catch (e) { console.warn(e); } }, 200);
+  }
 
   setInterval(updateHud, 1000);
 })();
