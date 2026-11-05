@@ -126,13 +126,49 @@
   };
   $('#nick').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('#btn-join').click(); });
 
-  function unlockAudio() {
-    if (!otuAudio) return;
-    otuAudio.resume();
+  function syncAudioUnlockBanner() {
+    const btn = $('#audio-unlock');
+    if (!btn || !otuAudio) return;
+    const running = otuAudio.state() === 'running';
+    btn.hidden = running;
+    if (running) btn.setAttribute('aria-hidden', 'true');
   }
-  ['pointerdown', 'keydown', 'touchstart'].forEach((ev) => {
+
+  function unlockAudio(ev) {
+    if (!otuAudio) return;
+    const p = otuAudio.resume();
+    if (p && typeof p.then === 'function') {
+      p.then((ok) => {
+        syncAudioUnlockBanner();
+        if (ok && otuAudio.musicOn) {
+          /* music loop starts itself once ctx running */
+        }
+      }).catch(() => syncAudioUnlockBanner());
+    } else {
+      syncAudioUnlockBanner();
+    }
+  }
+  ['pointerdown', 'touchstart', 'keydown'].forEach((ev) => {
     window.addEventListener(ev, unlockAudio, { once: false, passive: true });
   });
+  const audioUnlockBtn = $('#audio-unlock');
+  if (audioUnlockBtn) {
+    audioUnlockBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      unlockAudio(e);
+      if (otuAudio) {
+        otuAudio.setMusic(true);
+        otuAudio.setSfx(true);
+        refreshAudioBtns();
+        otuAudio.click();
+      }
+      syncAudioUnlockBanner();
+    });
+  }
+  // Show banner until unlocked (first entry / iOS)
+  setTimeout(syncAudioUnlockBanner, 400);
+  setInterval(syncAudioUnlockBanner, 1500);
 
 
   function initWorld() {
@@ -213,6 +249,12 @@
     $('#info-days').textContent = `✏️ Đã gạch: ${(world.totalDaysMarked || me.daysMarked || 0).toLocaleString('vi-VN')} ngày`;
     $('#info-room').textContent = `🚪 Phòng của bạn: ${roomCode(me.room)}`;
     $('#info-sentence').textContent = `⚖️ Còn ${me.sentenceLeftDays} ngày · 🏅 ${me.rehabRatingLabel || 'Kém'} (${me.rehabPoints || 0}đ)`;
+    const rk = me.rank || {};
+    const rankEl = $('#info-rank');
+    if (rankEl) {
+      const next = rk.nextXp != null ? ` · tới ${rk.nextName || '?'} ${rk.nextXp}XP` : ' · MAX';
+      rankEl.textContent = `${rk.emoji || '🐣'} Hạng: ${rk.name || 'Tù mới'} · ${rk.xp || me.rankXp || 0} XP${next}`;
+    }
     if (world.schedule) {
       const left = Math.max(0, Math.ceil((world.schedule.endsAt - Date.now()) / 1000));
       $('#schedule-banner').hidden = false;
@@ -352,7 +394,8 @@
     const lb = world.leaderboard || {};
     const block = (title, rows, fmt) => `<h3 style="margin:10px 0 6px;font-size:14px;color:var(--accent)">${title}</h3>` +
       (rows && rows.length ? rows.map((r, i) => `<div class="list"><li><span>#${i + 1} ${escapeHtml(r.nickname)}</span><span class="meta">${fmt(r)}</span></li></div>`).join('') : '<div class="meta">Trống</div>');
-    return block('🏆 Thắng game', lb.wins, (r) => `🏆${r.gameWins}`) +
+    return block('🎖️ Hạng tù nhân', lb.ranks, (r) => `${r.rankEmoji || ''} ${r.rankName || ''} · ${r.rankXp || 0}XP`) +
+      block('🏆 Thắng game', lb.wins, (r) => `🏆${r.gameWins}`) +
       block('🏅 Điểm cải tạo', lb.rehab, (r) => `${r.rehabPoints}đ · ${r.rehabRatingLabel || ''}`) +
       block('🕊️ Ra tù sớm nhất', lb.earlyRelease, (r) => `${r.daysServed}/${r.sentenceTotalDays} ngày`);
   }
@@ -387,6 +430,7 @@
       <div class="pcard-row"><span>Án còn</span><b>${me.sentenceLeftDays} / ${me.sentenceTotalDays} ngày</b></div>
       <div class="pcard-row"><span>Cải tạo</span><b>${me.rehabRatingLabel} (${me.rehabPoints}đ)</b></div>
       <div class="pcard-row"><span>Thắng game</span><b>${me.gameWins || 0}</b></div>
+      <div class="pcard-row"><span>Hạng</span><b>${(me.rank && me.rank.emoji) || '🐣'} ${(me.rank && me.rank.name) || 'Tù mới'} · ${me.rankXp || 0}XP</b></div>
     </div>`;
   }
   function renderProfile() {
@@ -401,6 +445,9 @@
       <div class="pcard-row"><span>Xếp loại</span><b>${escapeHtml(me.rehabRatingLabel || 'Kém')}</b></div>
       <div class="pcard-row"><span>Điểm cải tạo</span><b>${me.rehabPoints || 0}</b></div>
       <div class="pcard-row"><span>Tiền / thắng</span><b>${me.money}₫ · 🏆${me.gameWins || 0}</b></div>
+      <div class="pcard-row"><span>Hạng tù nhân</span><b>${(me.rank && me.rank.emoji) || '🐣'} ${(me.rank && me.rank.name) || 'Tù mới'}</b></div>
+      <div class="pcard-row"><span>XP hạng</span><b>${me.rankXp || 0}${(me.rank && me.rank.nextXp != null) ? ' / ' + me.rank.nextXp : ''}</b></div>
+      <div class="pcard-row"><span>Ưu đãi hạng</span><b>+${Math.round(((me.rank && me.rank.payBonus) || 0) * 100)}% lương · −${Math.round(((me.rank && me.rank.shopDiscount) || 0) * 100)}% shop</b></div>
     </div>`;
   }
   function renderRooms() {
@@ -568,6 +615,7 @@
     wb.textContent = `Chào ${info.nickname}! Số hiệu ${info.prisonerNo || ''} — cải tạo tốt sẽ được giảm án!`;
     setTimeout(() => { wb.hidden = true; }, 5000);
     toast(`Chào mừng ${info.nickname}`);
+    syncAudioUnlockBanner();
     if (!localStorage.getItem('otu_help_seen')) {
       $('#help-modal').hidden = false;
       localStorage.setItem('otu_help_seen', '1');
@@ -588,6 +636,8 @@
         mesh.userData.nickname = p.nickname;
         mesh.userData.prisonerNo = p.prisonerNo;
         mesh.userData.emote = p.emote;
+        mesh.userData.rankEmoji = (p.rank && p.rank.emoji) || '🐣';
+        mesh.userData.rankName = (p.rank && p.rank.name) || 'Tù mới';
       }
       // cooking ambience in kitchen
       if (p.room === 'nha_bep' && otuAudio) otuAudio.cook();
@@ -627,6 +677,22 @@
   socket.on('errorMsg', (msg) => {
     if (!$('#join-screen').hidden) $('#join-error').textContent = msg;
     else toast(msg);
+  });
+  socket.on('rankUp', (payload) => {
+    const msg = (payload && payload.message) || 'Thăng hạng!';
+    toast(msg);
+    let toastEl = document.createElement('div');
+    toastEl.className = 'rank-toast';
+    toastEl.textContent = msg;
+    document.body.appendChild(toastEl);
+    setTimeout(() => toastEl.remove(), 4200);
+    unlockAudio();
+    if (otuAudio) otuAudio.rankUp();
+    if (payload && payload.rank && me) {
+      me.rank = payload.rank;
+      me.rankXp = payload.rank.xp;
+      updateHud();
+    }
   });
   socket.on('actionResult', (r) => {
     toast(r.message || '');

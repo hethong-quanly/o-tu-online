@@ -10,7 +10,8 @@
     this.musicOn = true;
     this.sfxOn = true;
     this._started = false;
-    this._musicNodes = [];
+    this._unlocked = false;
+    this._musicTimer = null;
     this._stepAt = 0;
     this._cookAt = 0;
     try {
@@ -21,43 +22,60 @@
   }
 
   OtuAudio.prototype._save = function () {
-    try { localStorage.setItem('otu_audio', JSON.stringify({ musicOn: this.musicOn, sfxOn: this.sfxOn })); } catch (_) {}
+    try {
+      localStorage.setItem('otu_audio', JSON.stringify({ musicOn: this.musicOn, sfxOn: this.sfxOn }));
+    } catch (_) {}
   };
 
   OtuAudio.prototype.ensure = function () {
-    if (this._started) return true;
     const AC = window.AudioContext || window.webkitAudioContext;
     if (!AC) return false;
-    this.ctx = new AC();
-    this.master = this.ctx.createGain();
-    this.master.gain.value = 0.7;
-    this.master.connect(this.ctx.destination);
-    this.musicGain = this.ctx.createGain();
-    this.musicGain.gain.value = this.musicOn ? 0.18 : 0;
-    this.musicGain.connect(this.master);
-    this.sfxGain = this.ctx.createGain();
-    this.sfxGain.gain.value = this.sfxOn ? 0.55 : 0;
-    this.sfxGain.connect(this.master);
-    this._started = true;
-    if (this.ctx.state === 'suspended') this.ctx.resume();
-    this._startMusic();
+    if (!this.ctx) {
+      this.ctx = new AC();
+      this.master = this.ctx.createGain();
+      this.master.gain.value = 1.0;
+      this.master.connect(this.ctx.destination);
+      this.musicGain = this.ctx.createGain();
+      this.musicGain.gain.value = this.musicOn ? 0.32 : 0;
+      this.musicGain.connect(this.master);
+      this.sfxGain = this.ctx.createGain();
+      this.sfxGain.gain.value = this.sfxOn ? 0.85 : 0;
+      this.sfxGain.connect(this.master);
+      this._started = true;
+      this._startMusic();
+    }
     return true;
   };
 
   OtuAudio.prototype.resume = function () {
-    if (!this.ensure()) return;
-    if (this.ctx.state === 'suspended') this.ctx.resume();
+    if (!this.ensure()) return Promise.resolve(false);
+    const finish = () => {
+      this._unlocked = this.ctx.state === 'running';
+      return this._unlocked;
+    };
+    if (this.ctx.state === 'suspended') {
+      return this.ctx.resume().then(finish).catch(() => false);
+    }
+    return Promise.resolve(finish());
+  };
+
+  OtuAudio.prototype.state = function () {
+    return this.ctx ? this.ctx.state : 'none';
   };
 
   OtuAudio.prototype.setMusic = function (on) {
     this.musicOn = !!on;
-    if (this.musicGain) this.musicGain.gain.setTargetAtTime(on ? 0.18 : 0, this.ctx.currentTime, 0.05);
+    if (this.musicGain && this.ctx) {
+      this.musicGain.gain.setTargetAtTime(on ? 0.32 : 0, this.ctx.currentTime, 0.05);
+    }
     this._save();
   };
 
   OtuAudio.prototype.setSfx = function (on) {
     this.sfxOn = !!on;
-    if (this.sfxGain) this.sfxGain.gain.setTargetAtTime(on ? 0.55 : 0, this.ctx.currentTime, 0.05);
+    if (this.sfxGain && this.ctx) {
+      this.sfxGain.gain.setTargetAtTime(on ? 0.85 : 0, this.ctx.currentTime, 0.05);
+    }
     this._save();
   };
 
@@ -72,7 +90,7 @@
   };
 
   OtuAudio.prototype._tone = function (freq, dur, type, gain, dest, slide) {
-    if (!this._started || !dest) return;
+    if (!this._started || !dest || !this.ctx) return;
     const t0 = this.ctx.currentTime;
     const o = this.ctx.createOscillator();
     const g = this.ctx.createGain();
@@ -87,7 +105,7 @@
   };
 
   OtuAudio.prototype._noise = function (dur, gain, dest, filterFreq) {
-    if (!this._started || !dest) return;
+    if (!this._started || !dest || !this.ctx) return;
     const n = Math.floor(this.ctx.sampleRate * dur);
     const buf = this.ctx.createBuffer(1, n, this.ctx.sampleRate);
     const d = buf.getChannelData(0);
@@ -107,28 +125,26 @@
   };
 
   OtuAudio.prototype._startMusic = function () {
-    // Soft looping pentatonic pad + plucky motif (original)
     const scale = [196, 220, 246.94, 293.66, 329.63, 392, 440];
     const beat = 0.55;
     const playBar = () => {
-      if (!this._started || !this.musicOn) {
-        this._musicTimer = setTimeout(playBar, 800);
+      if (!this._started) return;
+      if (!this.musicOn || !this.ctx || this.ctx.state !== 'running') {
+        this._musicTimer = setTimeout(playBar, 900);
         return;
       }
       const t0 = this.ctx.currentTime;
-      // pad
       [scale[0], scale[2], scale[4]].forEach((f, i) => {
         const o = this.ctx.createOscillator();
         const g = this.ctx.createGain();
         o.type = 'sine';
         o.frequency.value = f / (i === 0 ? 2 : 1);
         g.gain.setValueAtTime(0.0001, t0);
-        g.gain.linearRampToValueAtTime(0.045, t0 + 0.4);
+        g.gain.linearRampToValueAtTime(0.07, t0 + 0.4);
         g.gain.linearRampToValueAtTime(0.0001, t0 + beat * 8);
         o.connect(g); g.connect(this.musicGain);
         o.start(t0); o.stop(t0 + beat * 8 + 0.05);
       });
-      // melody
       for (let i = 0; i < 8; i++) {
         const f = scale[(i * 3 + Math.floor(Math.random() * 2)) % scale.length];
         const o = this.ctx.createOscillator();
@@ -137,7 +153,7 @@
         o.frequency.value = f;
         const tt = t0 + i * beat;
         g.gain.setValueAtTime(0.0001, tt);
-        g.gain.exponentialRampToValueAtTime(0.07, tt + 0.03);
+        g.gain.exponentialRampToValueAtTime(0.11, tt + 0.03);
         g.gain.exponentialRampToValueAtTime(0.0001, tt + beat * 0.85);
         o.connect(g); g.connect(this.musicGain);
         o.start(tt); o.stop(tt + beat);
@@ -149,45 +165,60 @@
 
   OtuAudio.prototype.footstep = function () {
     if (!this.sfxOn || !this.ensure()) return;
+    if (this.ctx.state !== 'running') return;
     const now = performance.now();
     if (now - this._stepAt < 280) return;
     this._stepAt = now;
-    this._noise(0.08, 0.12, this.sfxGain, 350 + Math.random() * 200);
-    this._tone(90 + Math.random() * 30, 0.06, 'sine', 0.08, this.sfxGain);
+    this._noise(0.08, 0.22, this.sfxGain, 350 + Math.random() * 200);
+    this._tone(90 + Math.random() * 30, 0.06, 'sine', 0.14, this.sfxGain);
   };
 
   OtuAudio.prototype.pushup = function () {
     if (!this.sfxOn || !this.ensure()) return;
-    this._tone(120, 0.12, 'sawtooth', 0.12, this.sfxGain, 70);
-    setTimeout(() => this._noise(0.1, 0.1, this.sfxGain, 200), 80);
-    setTimeout(() => this._tone(160, 0.1, 'triangle', 0.1, this.sfxGain, 100), 160);
+    this.resume();
+    this._tone(120, 0.12, 'sawtooth', 0.2, this.sfxGain, 70);
+    setTimeout(() => this._noise(0.1, 0.16, this.sfxGain, 200), 80);
+    setTimeout(() => this._tone(160, 0.1, 'triangle', 0.16, this.sfxGain, 100), 160);
   };
 
   OtuAudio.prototype.cook = function () {
     if (!this.sfxOn || !this.ensure()) return;
+    if (this.ctx.state !== 'running') return;
     const now = performance.now();
     if (now - this._cookAt < 900) return;
     this._cookAt = now;
-    this._noise(0.25, 0.08, this.sfxGain, 2400);
-    this._tone(520, 0.05, 'square', 0.04, this.sfxGain);
-    setTimeout(() => this._tone(440, 0.05, 'square', 0.03, this.sfxGain), 120);
+    this._noise(0.28, 0.14, this.sfxGain, 2400);
+    this._tone(520, 0.05, 'square', 0.08, this.sfxGain);
+    setTimeout(() => this._tone(440, 0.05, 'square', 0.06, this.sfxGain), 120);
   };
 
   OtuAudio.prototype.alert = function () {
     if (!this.sfxOn || !this.ensure()) return;
-    this._tone(880, 0.15, 'square', 0.15, this.sfxGain, 660);
-    setTimeout(() => this._tone(660, 0.2, 'square', 0.12, this.sfxGain, 440), 150);
+    this.resume();
+    this._tone(880, 0.15, 'square', 0.22, this.sfxGain, 660);
+    setTimeout(() => this._tone(660, 0.2, 'square', 0.18, this.sfxGain, 440), 150);
   };
 
   OtuAudio.prototype.coin = function () {
     if (!this.sfxOn || !this.ensure()) return;
-    this._tone(660, 0.08, 'sine', 0.12, this.sfxGain);
-    setTimeout(() => this._tone(990, 0.12, 'sine', 0.1, this.sfxGain), 70);
+    this.resume();
+    this._tone(660, 0.08, 'sine', 0.18, this.sfxGain);
+    setTimeout(() => this._tone(990, 0.12, 'sine', 0.15, this.sfxGain), 70);
   };
 
   OtuAudio.prototype.click = function () {
     if (!this.sfxOn || !this.ensure()) return;
-    this._tone(440, 0.04, 'triangle', 0.06, this.sfxGain);
+    this.resume();
+    this._tone(440, 0.04, 'triangle', 0.1, this.sfxGain);
+  };
+
+  OtuAudio.prototype.rankUp = function () {
+    if (!this.sfxOn || !this.ensure()) return;
+    this.resume();
+    this._tone(392, 0.12, 'triangle', 0.2, this.sfxGain);
+    setTimeout(() => this._tone(523.25, 0.14, 'triangle', 0.22, this.sfxGain), 100);
+    setTimeout(() => this._tone(659.25, 0.22, 'sine', 0.24, this.sfxGain), 220);
+    setTimeout(() => this._noise(0.15, 0.1, this.sfxGain, 1200), 280);
   };
 
   global.OtuAudio = OtuAudio;

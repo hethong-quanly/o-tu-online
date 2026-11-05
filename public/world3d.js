@@ -603,6 +603,8 @@
     }
     if (p.nickname) meshP.userData.nickname = p.nickname;
     if (p.prisonerNo) meshP.userData.prisonerNo = p.prisonerNo;
+    if (p.rankEmoji) meshP.userData.rankEmoji = p.rankEmoji;
+    if (p.rankName) meshP.userData.rankName = p.rankName;
     if (p.emote) meshP.userData.emote = p.emote;
     if (p.sleeping) meshP.userData.emote = 'sleep';
     return meshP;
@@ -799,7 +801,10 @@
       const isMe = meshP.userData.id === this.myId;
       const isPlayer = !meshP.userData.isNpc && meshP.userData.kind !== 'guard';
       const tagCls = cls || (isMe || isPlayer ? 'ntag me' : 'ntag npc');
-      html += `<div class="${tagCls}" style="transform:translate(${x}px,${y}px) translate(-50%,-100%)">${escapeHtml(name)}</div>`;
+      const badge = (isPlayer || isMe) && meshP.userData.rankEmoji
+        ? `<span class="rank-badge" title="${escapeHtml(meshP.userData.rankName || '')}">${escapeHtml(meshP.userData.rankEmoji)}</span>`
+        : '';
+      html += `<div class="${tagCls}" style="transform:translate(${x}px,${y}px) translate(-50%,-100%)">${badge}${escapeHtml(name)}</div>`;
       const bub = this.bubbles.get(meshP.userData.id);
       if (bub && bub.until > now) {
         html += `<div class="sbubble" style="transform:translate(${x}px,${y - 28}px) translate(-50%,-100%)">${escapeHtml(bub.text)}</div>`;

@@ -18,7 +18,7 @@ const supabase = useSupabase
   : null;
 const MAX_PLAYERS = Math.max(1, parseInt(process.env.MAX_PLAYERS || '10000', 10) || 10000);
 const NPC_COUNT = Math.max(0, parseInt(process.env.NPC_COUNT || '16', 10) || 16);
-const VERSION = '3d-v4';
+const VERSION = '3d-v5';
 
 /** Guard NPCs — patrol, vision, bribe window (in-game money only) */
 const GUARD_DEFS = [
@@ -31,7 +31,9 @@ const guards = GUARD_DEFS.map((g) => ({
   route: g.route, routeIdx: 1, lookingAwayUntil: 0, chasingId: null, alertUntil: 0,
 }));
 function bribePrice(p) {
-  return Math.max(45, Math.floor(35 + (p.sentenceLeftDays || 0) / 10 + (p.escapeFails || 0) * 25 + (p.daysServed || 0) / 25));
+  const base = Math.max(45, Math.floor(35 + (p.sentenceLeftDays || 0) / 10 + (p.escapeFails || 0) * 25 + (p.daysServed || 0) / 25));
+  const disc = rankFromXp(p.rankXp || 0).bribeDiscount || 0;
+  return Math.max(25, Math.floor(base * (1 - disc)));
 }
 function activeBribe(p) {
   return !!(p.bribeGuardId && p.bribeUntil && Date.now() < p.bribeUntil);
@@ -45,6 +47,110 @@ function publicGuards() {
     chasingId: g.chasingId,
   }));
 }
+
+/** Funny prisoner ranks (no real-gang refs) — XP + soft perks */
+const RANKS = [
+  { id: 'tu_moi', name: 'Tù mới', emoji: '🐣', xp: 0, payBonus: 0, shopDiscount: 0, bribeDiscount: 0 },
+  { id: 'ma_cu', name: 'Ma cũ', emoji: '😼', xp: 40, payBonus: 0.05, shopDiscount: 0.05, bribeDiscount: 0.05 },
+  { id: 'dai_ca', name: 'Đại ca', emoji: '😎', xp: 120, payBonus: 0.1, shopDiscount: 0.08, bribeDiscount: 0.1 },
+  { id: 'trum_buong', name: 'Trùm buồng', emoji: '🦁', xp: 280, payBonus: 0.15, shopDiscount: 0.12, bribeDiscount: 0.15 },
+  { id: 'trum_khu', name: 'Trùm khu vực', emoji: '👑', xp: 550, payBonus: 0.22, shopDiscount: 0.16, bribeDiscount: 0.2 },
+  { id: 'trum_trai', name: 'Trùm trại', emoji: '🏆', xp: 950, payBonus: 0.3, shopDiscount: 0.2, bribeDiscount: 0.25 },
+];
+
+function rankFromXp(xp) {
+  let cur = RANKS[0];
+  for (const r of RANKS) {
+    if ((xp || 0) >= r.xp) cur = r;
+  }
+  return cur;
+}
+
+function nextRank(xp) {
+  const cur = rankFromXp(xp);
+  const idx = RANKS.findIndex((r) => r.id === cur.id);
+  return idx >= 0 && idx < RANKS.length - 1 ? RANKS[idx + 1] : null;
+}
+
+function rankPublic(p) {
+  const xp = p.rankXp || 0;
+  const r = rankFromXp(xp);
+  const n = nextRank(xp);
+  return {
+    id: r.id,
+    name: r.name,
+    emoji: r.emoji,
+    xp,
+    nextXp: n ? n.xp : null,
+    nextName: n ? n.name : null,
+    payBonus: r.payBonus,
+    shopDiscount: r.shopDiscount,
+    bribeDiscount: r.bribeDiscount,
+  };
+}
+
+function grantRankXp(p, amount, socket) {
+  if (!p || !amount) return null;
+  const before = rankFromXp(p.rankXp || 0);
+  p.rankXp = Math.max(0, (p.rankXp || 0) + amount);
+  const after = rankFromXp(p.rankXp);
+  if (after.id !== before.id) {
+    p.rankId = after.id;
+    if (socket) {
+      socket.emit('rankUp', {
+        rank: rankPublic(p),
+        message: `${after.emoji} Thăng hạng: ${after.name}! (+lương +giảm giá shop/hối lộ)`,
+      });
+    }
+    pushChat({
+      type: 'system',
+      text: `${after.emoji} ${p.nickname} lên hạng ${after.name}!`,
+      ts: Date.now(),
+    });
+    return after;
+  }
+  p.rankId = after.id;
+  return null;
+}
+
+function isTestNickKey(key) {
+  const k = String(key || '').toLowerCase().trim();
+  if (!k) return false;
+  if (k === 'anh 3 trà cú' || k === 'công chúa') return false;
+  return /^(phuctest|alpha$|beta$|debug|sọc|soc3d|áoxanh|phúcshot|tùnhân|chibi|desk|mobi|diag|audio|bribe)/i.test(k);
+}
+
+async function purgeTestAccounts() {
+  const removed = [];
+  for (const key of Object.keys(playersByNick)) {
+    if (isTestNickKey(key)) {
+      delete playersByNick[key];
+      removed.push(key);
+    }
+  }
+  for (let i = letters.length - 1; i >= 0; i--) {
+    const nick = String(letters[i].nick || '').toLowerCase();
+    if (isTestNickKey(nick)) letters.splice(i, 1);
+  }
+  if (!removed.length) return 0;
+  console.log(`[persist] purged ${removed.length} test accounts from memory`);
+  if (useSupabase) {
+    try {
+      await supabase.from('leaderboard_stats').delete().in('nick_key', removed);
+      await supabase.from('players').delete().in('nick_key', removed);
+      // Delete letters authored by purged test nicks only (keep real humans)
+      const { data: letterRows } = await supabase.from('letters').select('id, nick');
+      const badIds = (letterRows || [])
+        .filter((L) => isTestNickKey(String(L.nick || '').toLowerCase()))
+        .map((L) => L.id);
+      if (badIds.length) await supabase.from('letters').delete().in('id', badIds);
+    } catch (e) {
+      console.error('[persist] purge supabase', e.message);
+    }
+  }
+  return removed.length;
+}
+
 
 
 const app = express();
@@ -220,6 +326,7 @@ function unlockAchievements(p, socket) {
     if ((stats[a.stat] || 0) >= a.target) {
       p.achievementsUnlocked[a.id] = Date.now();
       p.rehabPoints = (p.rehabPoints || 0) + a.points;
+      grantRankXp(p, Math.max(10, a.points * 2), socket);
       newly.push(a);
     }
   }
@@ -252,6 +359,8 @@ function defaultPlayer(payload, socketId) {
     daysServed: 0,
     rehabPoints: 0,
     rehabRating: 'kem',
+    rankXp: 0,
+    rankId: 'tu_moi',
     achievementsUnlocked: {},
     workCount: 0,
     scheduleAttend: 0,
@@ -334,6 +443,7 @@ function loadDataFromJson() {
 }
 
 function leaderboardStatsRow(p) {
+  const rank = rankFromXp(p.rankXp || 0);
   return {
     nick_key: String(p.nickname || '').toLowerCase(),
     nickname: p.nickname,
@@ -345,6 +455,9 @@ function leaderboardStatsRow(p) {
     wins_rps: p.winsRps || 0,
     days_served: p.daysServed || 0,
     released: !!p.released,
+    rank_xp: p.rankXp || 0,
+    rank_id: rank.id,
+    rank_name: rank.name,
     updated_at: new Date().toISOString(),
   };
 }
@@ -461,6 +574,10 @@ async function loadData() {
       console.log('[persist] recovered from local JSON after load error');
     } catch (_) {}
   }
+  const purged = await purgeTestAccounts();
+  if (purged) {
+    try { await saveData(); } catch (e) { console.error('[persist] post-purge save', e.message); }
+  }
 }
 
 function currentSchedule() {
@@ -483,6 +600,8 @@ function publicPlayer(p) {
     rehabPoints: p.rehabPoints || 0,
     rehabRating: rating.id,
     rehabRatingLabel: rating.label,
+    rank: rankPublic(p),
+    rankXp: p.rankXp || 0,
     achievements: computeAchievementProgress(p),
     money: Math.floor(p.money),
     health: Math.round(p.health),
@@ -519,21 +638,28 @@ function publicPlayer(p) {
 function leaderboard() {
   const all = { ...playersByNick };
   for (const p of online.values()) all[p.nickname.toLowerCase()] = stripTransient(p);
-  const list = Object.values(all).map((p) => ({
-    nickname: p.nickname,
-    fullName: p.fullName || p.nickname,
-    prisonerNo: p.prisonerNo,
-    money: Math.floor(p.money || 0),
-    rehabPoints: p.rehabPoints || 0,
-    rehabRatingLabel: ratingFromPoints(p.rehabPoints || 0).label,
-    gameWins: p.gameWins || 0,
-    daysServed: p.daysServed || 0,
-    sentenceTotalDays: p.sentenceTotalDays || 0,
-    released: !!p.released,
-    earlyRelease: !!p.earlyRelease,
-    escaped: !!p.escaped,
-    releasedAt: p.releasedAt || null,
-  }));
+  const list = Object.values(all).map((p) => {
+    const rank = rankFromXp(p.rankXp || 0);
+    return {
+      nickname: p.nickname,
+      fullName: p.fullName || p.nickname,
+      prisonerNo: p.prisonerNo,
+      money: Math.floor(p.money || 0),
+      rehabPoints: p.rehabPoints || 0,
+      rehabRatingLabel: ratingFromPoints(p.rehabPoints || 0).label,
+      gameWins: p.gameWins || 0,
+      daysServed: p.daysServed || 0,
+      sentenceTotalDays: p.sentenceTotalDays || 0,
+      released: !!p.released,
+      earlyRelease: !!p.earlyRelease,
+      escaped: !!p.escaped,
+      releasedAt: p.releasedAt || null,
+      rankXp: p.rankXp || 0,
+      rankId: rank.id,
+      rankName: rank.name,
+      rankEmoji: rank.emoji,
+    };
+  });
   const early = list.filter((p) => p.released).sort((a, b) => {
     const sa = (a.daysServed || 0) / Math.max(1, a.sentenceTotalDays || 1);
     const sb = (b.daysServed || 0) / Math.max(1, b.sentenceTotalDays || 1);
@@ -541,7 +667,8 @@ function leaderboard() {
   }).slice(0, 10);
   const wins = list.slice().sort((a, b) => b.gameWins - a.gameWins || b.rehabPoints - a.rehabPoints).slice(0, 15);
   const rehab = list.slice().sort((a, b) => b.rehabPoints - a.rehabPoints).slice(0, 15);
-  return { wins, rehab, earlyRelease: early };
+  const ranks = list.slice().sort((a, b) => b.rankXp - a.rankXp || b.rehabPoints - a.rehabPoints).slice(0, 15);
+  return { wins, rehab, earlyRelease: early, ranks };
 }
 
 function roomCounts() {
@@ -800,6 +927,7 @@ setInterval(() => {
       p.scheduleAttend = (p.scheduleAttend || 0) + 1;
       p.rehabPoints = (p.rehabPoints || 0) + 2;
       const sock = [...io.sockets.sockets.values()].find((s) => s.id === sid);
+      grantRankXp(p, 6, sock);
       unlockAchievements(p, sock);
       if (sock) {
         sock.emit('actionResult', { kind: 'schedule', message: `✅ Có mặt đúng lịch (${phase.name}) +2 điểm cải tạo` });
@@ -854,6 +982,7 @@ function awardWin(p, kind, socket) {
   p.money += 10;
   p.totalEarned += 10;
   p.rehabPoints = (p.rehabPoints || 0) + 3;
+  grantRankXp(p, 15, socket);
   unlockAchievements(p, socket);
 }
 
@@ -886,7 +1015,7 @@ function emitMatch(m) {
 io.on('connection', (socket) => {
   socket.emit('config', {
     jobs: JOBS, shop: SHOP, rooms: ROOMS, appearance: APPEARANCE, roomGraph: ROOM_GRAPH,
-    crimes: CRIMES, sentences: SENTENCE_OPTIONS, achievements: ACHIEVEMENTS,
+    crimes: CRIMES, sentences: SENTENCE_OPTIONS, achievements: ACHIEVEMENTS, ranks: RANKS,
     schedule: currentSchedule(), dayTickMs: DAY_TICK_MS, reviewEveryDays: REVIEW_EVERY_DAYS,
     maxPlayers: MAX_PLAYERS, npcCount: NPC_COUNT, version: VERSION,
   });
@@ -958,9 +1087,13 @@ io.on('connection', (socket) => {
       p.gameWins = playersByNick[key].gameWins || 0;
       p.winsCaro = playersByNick[key].winsCaro || 0;
       p.winsRps = playersByNick[key].winsRps || 0;
+      p.rankXp = playersByNick[key].rankXp || 0;
+      p.rankId = rankFromXp(p.rankXp).id;
     } else {
       p = defaultPlayer(incoming, socket.id);
     }
+    p.rankXp = p.rankXp || 0;
+    p.rankId = rankFromXp(p.rankXp).id;
 
     // unlock good_behavior baseline check later; grant clean if no fails
     unlockAchievements(p, socket);
@@ -1059,6 +1192,7 @@ io.on('connection', (socket) => {
     if (letters.length > MAX_LETTERS) letters.shift();
     p.lettersSent = (p.lettersSent || 0) + 1;
     p.rehabPoints = (p.rehabPoints || 0) + 2;
+    grantRankXp(p, 5, socket);
     setEmote(p, 'write', 5000);
     unlockAchievements(p, socket);
     pushChat({ type: 'system', text: `✉️ ${p.nickname} gửi thư — ghim Bảng Thư.`, ts: Date.now() });
@@ -1079,13 +1213,15 @@ io.on('connection', (socket) => {
     if (p.energy < job.energyCost) { socket.emit('errorMsg', 'Không đủ năng lượng!'); return; }
     p.sleeping = false;
     const toolBonus = 1 + (p.upgrades.cong_cu || 0) * 0.15;
-    const pay = Math.floor(job.basePay * toolBonus * (0.9 + Math.random() * 0.2));
+    const rankBonus = 1 + (rankFromXp(p.rankXp || 0).payBonus || 0);
+    const pay = Math.floor(job.basePay * toolBonus * rankBonus * (0.9 + Math.random() * 0.2));
     p.energy -= job.energyCost;
     p.money += pay;
     p.totalEarned += pay;
     p.reputation += 1;
     p.workCount = (p.workCount || 0) + 1;
     p.rehabPoints = (p.rehabPoints || 0) + 2;
+    grantRankXp(p, 8, socket);
     p.health = Math.max(10, p.health - Math.floor(job.energyCost / 4));
     p.cooldowns[jobId] = now + job.cooldownMs;
     unlockAchievements(p, socket);
@@ -1099,9 +1235,11 @@ io.on('connection', (socket) => {
     if (!p || p.escaped || p.released) return;
     const item = SHOP[itemId];
     if (!item) return;
+    const shopDisc = rankFromXp(p.rankXp || 0).shopDiscount || 0;
     if (itemId === 'do_an') {
-      if (p.money < item.price) { socket.emit('errorMsg', 'Không đủ tiền!'); return; }
-      p.money -= item.price;
+      const foodPrice = Math.max(1, Math.floor(item.price * (1 - shopDisc)));
+      if (p.money < foodPrice) { socket.emit('errorMsg', 'Không đủ tiền!'); return; }
+      p.money -= foodPrice;
       p.health = Math.min(p.maxHealth, p.health + 15);
       p.energy = Math.min(p.maxEnergy, p.energy + 20);
       emitSelf(socket, p);
@@ -1111,7 +1249,7 @@ io.on('connection', (socket) => {
     }
     const level = p.upgrades[itemId] || 0;
     if (level >= item.maxLevel) { socket.emit('errorMsg', 'Đã tối đa!'); return; }
-    const price = item.price * (level + 1);
+    const price = Math.max(1, Math.floor(item.price * (level + 1) * (1 - shopDisc)));
     if (p.money < price) { socket.emit('errorMsg', 'Không đủ tiền!'); return; }
     p.money -= price;
     p.upgrades[itemId] = level + 1;
@@ -1384,11 +1522,13 @@ const ROOM_NEIGHBORS = {
 };
 
 function posePayload(p) {
+  const rank = rankFromXp(p.rankXp || 0);
   return {
     id: p.id, nickname: p.nickname, prisonerNo: p.prisonerNo,
     x: p.x, z: p.z, rotY: p.rotY || 0, room: p.room,
     appearance: p.appearance, emote: p.emote && Date.now() < p.emoteUntil ? p.emote : null,
     sleeping: !!p.sleeping,
+    rankEmoji: rank.emoji, rankName: rank.name, rankId: rank.id,
   };
 }
 
