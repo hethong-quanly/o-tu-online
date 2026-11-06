@@ -1,130 +1,75 @@
 {
-  "changed_files": [
-    "server.js",
-    "lib/v6.js",
-    "STORE_GUIDE.md",
-    "public/index.html",
-    "lib/v7.js",
-    "lib/auth.js"
-  ],
-  "replacements": [
-    {
-      "file": "server.js",
-      "from_to": "trước đã→trước nha",
-      "count": 1
-    },
-    {
-      "file": "lib/v6.js",
-      "from_to": "thìa→muỗng",
-      "count": 1
-    },
-    {
-      "file": "STORE_GUIDE.md",
-      "from_to": "bao giờ→khi nào",
-      "count": 1
-    },
-    {
-      "file": "public/index.html",
-      "from_to": "Chạm theo nhịp!→Chạm theo nhịp nha!",
-      "count": 1
-    },
-    {
-      "file": "public/index.html",
-      "from_to": "Đã hiểu→Hiểu rồi nha",
-      "count": 1
-    },
-    {
-      "file": "server.js",
-      "from_to": "Không đủ tiền!→Không đủ xu!",
-      "count": 2
-    },
-    {
-      "file": "server.js",
-      "from_to": "Không đủ năng lượng!→Không đủ năng lượng nha!",
-      "count": 1
-    },
-    {
-      "file": "server.js",
-      "from_to": "Cán bộ còn nghi ngờ — đợi chút rồi hối lộ tiếp.→Cán bộ còn nghi — chờ tí rồi lo lót tiếp nha.",
-      "count": 1
-    },
-    {
-      "file": "server.js",
-      "from_to": "Không thấy cán bộ gần đây.→Không thấy cán bộ gần đây nha.",
-      "count": 1
-    },
-    {
-      "file": "lib/v7.js",
-      "from_to": "Hái rau củ tại vườn lao động→Hái rau củ, trái cây ở vườn lao động",
-      "count": 1
-    },
-    {
-      "file": "lib/auth.js",
-      "from_to": "Mật khẩu phải từ 6 ký tự.→Mật khẩu từ 6 ký tự trở lên nha.",
-      "count": 1
-    },
-    {
-      "file": "lib/cooking.js",
-      "from_to": "lạc→đậu phộng (quiz)",
-      "count": 1
-    },
-    {
-      "file": "lib/cooking.js",
-      "from_to": "dứa/me→trái thơm (quiz)",
-      "count": 1
-    },
-    {
-      "file": "lib/cooking.js",
-      "from_to": "thìa→muỗng (quiz)",
-      "count": 1
-    },
-    {
-      "file": "lib/cooking.js",
-      "from_to": "như thế nào→sao (quiz c2)",
-      "count": 1
-    },
-    {
-      "file": "lib/cooking.js",
-      "from_to": "thêm bắp/mè southern dishes",
-      "count": 3
-    },
-    {
-      "file": "lib/canteen.js",
-      "from_to": "SELLER_SLOT_FEE 800→500",
-      "count": 1
-    },
-    {
-      "file": "lib/labor.js",
-      "from_to": "growMs 20s→8s",
-      "count": 1
-    },
-    {
-      "file": "server.js",
-      "from_to": "exercise cut → finishIntakeStartTrial",
-      "count": 1
-    }
-  ],
+  "version": "3d-v14",
   "reviewed_mapping": [
     "thìa→muỗng",
-    "bát→chén (tránh lục bát)",
+    "bát→chén (giữ lục bát)",
     "lạc→đậu phộng",
-    "dứa→thơm",
+    "dứa→thơm / trái thơm",
     "ngô→bắp",
     "hoa quả→trái cây",
-    "quả (trái cây)→trái",
+    "quả (trái cây)→trái (giữ Kết quả / quả tang / lục bát)",
     "ốm→bệnh",
     "vừng→mè",
     "cốc→ly",
     "lợn→heo",
     "ngã→té",
-    "bao giờ→khi nào",
-    "thế nào→như thế nào",
+    "bao giờ→khi nào (giữ Không bao giờ)",
+    "thế nào→sao / như thế nào",
     "chăn→mền",
     "phòng vệ sinh→nhà vệ sinh",
     "xe ô tô→xe hơi",
     "vâng→dạ",
     "nhé→nha",
     "đậu phụ→đậu hũ",
-    "hối lộ (context lo lót căn tin)"
-  ]
+    "hối lộ (context căn tin)→lo lót",
+    "tiền (UI thiếu)→xu"
+  ],
+  "replacements_applied": [
+    {
+      "file": "lib/v6.js",
+      "change": "thìa→muỗng"
+    },
+    {
+      "file": "lib/v7.js",
+      "change": "Hái rau củ…→…trái cây ở vườn lao động"
+    },
+    {
+      "file": "lib/auth.js",
+      "change": "Mật khẩu tip → …nha"
+    },
+    {
+      "file": "lib/cooking.js",
+      "change": "quiz bank Southern: đậu phộng, trái thơm, muỗng, mè, bắp, heo; lửa sao?"
+    },
+    {
+      "file": "lib/canteen.js",
+      "change": "menu Trái cây; lo lót fee 500xu"
+    },
+    {
+      "file": "STORE_GUIDE.md",
+      "change": "bao giờ→khi nào"
+    },
+    {
+      "file": "public/index.html",
+      "change": "nhịp nha; Hiểu rồi nha; tip căn tin/bếp/lao động"
+    },
+    {
+      "file": "server.js",
+      "change": "Không đủ tiền→xu; năng lượng nha; lo lót tip; trước nha"
+    }
+  ],
+  "kept_on_purpose": [
+    "lục bát (thể thơ)",
+    "Ngô Tất Tố (tên riêng — câu tòa)",
+    "Kết quả…",
+    "bắt quả tang",
+    "Không bao giờ",
+    "nói chuyện, ghế, đẹp trai, gối",
+    "mì (giữ)"
+  ],
+  "live": {
+    "url": "https://o-tu-online.onrender.com",
+    "version": "3d-v14",
+    "commit": "a2d95a6"
+  }
 }

@@ -1,0 +1,18 @@
+{
+  "version": "3d-v14",
+  "at": "2026-11-06T03:59:40.625Z",
+  "canteenFeeHint": true,
+  "treasury": 0,
+  "cookingSteps": [
+    "so_che",
+    "nau",
+    "nem",
+    "don"
+  ],
+  "laborChains": [
+    "farm",
+    "sewing",
+    "carpentry",
+    "heavy"
+  ]
+}
