@@ -1,0 +1,130 @@
+{
+  "changed_files": [
+    "server.js",
+    "lib/v6.js",
+    "STORE_GUIDE.md",
+    "public/index.html",
+    "lib/v7.js",
+    "lib/auth.js"
+  ],
+  "replacements": [
+    {
+      "file": "server.js",
+      "from_to": "trước đã→trước nha",
+      "count": 1
+    },
+    {
+      "file": "lib/v6.js",
+      "from_to": "thìa→muỗng",
+      "count": 1
+    },
+    {
+      "file": "STORE_GUIDE.md",
+      "from_to": "bao giờ→khi nào",
+      "count": 1
+    },
+    {
+      "file": "public/index.html",
+      "from_to": "Chạm theo nhịp!→Chạm theo nhịp nha!",
+      "count": 1
+    },
+    {
+      "file": "public/index.html",
+      "from_to": "Đã hiểu→Hiểu rồi nha",
+      "count": 1
+    },
+    {
+      "file": "server.js",
+      "from_to": "Không đủ tiền!→Không đủ xu!",
+      "count": 2
+    },
+    {
+      "file": "server.js",
+      "from_to": "Không đủ năng lượng!→Không đủ năng lượng nha!",
+      "count": 1
+    },
+    {
+      "file": "server.js",
+      "from_to": "Cán bộ còn nghi ngờ — đợi chút rồi hối lộ tiếp.→Cán bộ còn nghi — chờ tí rồi lo lót tiếp nha.",
+      "count": 1
+    },
+    {
+      "file": "server.js",
+      "from_to": "Không thấy cán bộ gần đây.→Không thấy cán bộ gần đây nha.",
+      "count": 1
+    },
+    {
+      "file": "lib/v7.js",
+      "from_to": "Hái rau củ tại vườn lao động→Hái rau củ, trái cây ở vườn lao động",
+      "count": 1
+    },
+    {
+      "file": "lib/auth.js",
+      "from_to": "Mật khẩu phải từ 6 ký tự.→Mật khẩu từ 6 ký tự trở lên nha.",
+      "count": 1
+    },
+    {
+      "file": "lib/cooking.js",
+      "from_to": "lạc→đậu phộng (quiz)",
+      "count": 1
+    },
+    {
+      "file": "lib/cooking.js",
+      "from_to": "dứa/me→trái thơm (quiz)",
+      "count": 1
+    },
+    {
+      "file": "lib/cooking.js",
+      "from_to": "thìa→muỗng (quiz)",
+      "count": 1
+    },
+    {
+      "file": "lib/cooking.js",
+      "from_to": "như thế nào→sao (quiz c2)",
+      "count": 1
+    },
+    {
+      "file": "lib/cooking.js",
+      "from_to": "thêm bắp/mè southern dishes",
+      "count": 3
+    },
+    {
+      "file": "lib/canteen.js",
+      "from_to": "SELLER_SLOT_FEE 800→500",
+      "count": 1
+    },
+    {
+      "file": "lib/labor.js",
+      "from_to": "growMs 20s→8s",
+      "count": 1
+    },
+    {
+      "file": "server.js",
+      "from_to": "exercise cut → finishIntakeStartTrial",
+      "count": 1
+    }
+  ],
+  "reviewed_mapping": [
+    "thìa→muỗng",
+    "bát→chén (tránh lục bát)",
+    "lạc→đậu phộng",
+    "dứa→thơm",
+    "ngô→bắp",
+    "hoa quả→trái cây",
+    "quả (trái cây)→trái",
+    "ốm→bệnh",
+    "vừng→mè",
+    "cốc→ly",
+    "lợn→heo",
+    "ngã→té",
+    "bao giờ→khi nào",
+    "thế nào→như thế nào",
+    "chăn→mền",
+    "phòng vệ sinh→nhà vệ sinh",
+    "xe ô tô→xe hơi",
+    "vâng→dạ",
+    "nhé→nha",
+    "đậu phụ→đậu hũ",
+    "hối lộ (context lo lót căn tin)"
+  ]
+}

@@ -1,5 +1,5 @@
-/* Ở tù online — shell SW (3d-v13). Network-first for JS/CSS so phones get new builds. */
-const CACHE = 'otu-shell-v13';
+/* Ở tù online — shell SW (3d-v14). Network-first for JS/CSS so phones get new builds. */
+const CACHE = 'otu-shell-v14';
 const PRECACHE = [
   '/',
   '/index.html',

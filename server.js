@@ -11,8 +11,13 @@ const auth = require('./lib/auth');
 const trialLib = require('./lib/trial');
 const violLib = require('./lib/violations');
 const sentenceLib = require('./lib/sentence');
+const canteenLib = require('./lib/canteen');
+const cookingLib = require('./lib/cooking');
+const laborLib = require('./lib/labor');
 const pendingBets = new Map(); // betId -> { fromId, toId, amount, exp }
 const activeTrials = new Map(); // socketId -> { questions, startedAt }
+const activeCookQuiz = new Map(); // socketId -> questions
+const worldMeta = { canteen: null }; // filled after load
 
 const activeShows = new Map(); // showId -> { performerId, kind, x, z, cheers:Set, until, quality }
 
@@ -28,7 +33,7 @@ const supabase = useSupabase
   : null;
 const MAX_PLAYERS = Math.max(1, parseInt(process.env.MAX_PLAYERS || '10000', 10) || 10000);
 const NPC_COUNT = Math.max(0, parseInt(process.env.NPC_COUNT || '16', 10) || 16);
-const VERSION = '3d-v13';
+const VERSION = '3d-v14';
 
 /** Guard NPCs — patrol, vision, bribe window (in-game money only) */
 const GUARD_DEFS = [
@@ -482,6 +487,9 @@ function defaultPlayer(payload, socketId) {
     onlineMsServed: 0,
     violations: [],
     visitorMode: false,
+    jobRole: null, // null | canteen | cook
+    cookUntil: 0,
+    labor: null,
     happinessUnlocked: false,
     x: -42 + (Math.random() - 0.5) * 6,
     z: -8 + (Math.random() - 0.5) * 6,
@@ -612,6 +620,7 @@ function loadDataFromJson() {
   const raw = JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
   playersByNick = raw.players || raw || {};
   for (const k of Object.keys(playersByNick)) ensureAccountFields(playersByNick[k]);
+  worldMeta.canteen = canteenLib.ensureTreasury({ canteen: (raw && raw.canteen) || null });
   if (Array.isArray(raw.letters)) {
     letters.length = 0;
     letters.push(...raw.letters.slice(-MAX_LETTERS));
@@ -659,6 +668,12 @@ async function loadDataFromSupabase() {
     const ordered = letterRows.slice().reverse();
     letters.push(...ordered.map((l) => ({ id: l.id, nick: l.nick, text: l.text, ts: Number(l.ts) })));
   }
+  if (playersByNick['__world_meta__'] && playersByNick['__world_meta__'].canteen) {
+    worldMeta.canteen = canteenLib.ensureTreasury({ canteen: playersByNick['__world_meta__'].canteen });
+    delete playersByNick['__world_meta__'];
+  } else {
+    worldMeta.canteen = canteenLib.ensureTreasury(worldMeta);
+  }
   console.log(`[persist] Supabase: ${Object.keys(playersByNick).length} players, ${letters.length} letters`);
 }
 
@@ -668,6 +683,8 @@ async function saveDataToSupabase() {
   for (const key of Object.keys(playersByNick)) {
     if (isTestNickKey(key)) delete playersByNick[key];
   }
+  // persist canteen ledger via synthetic meta row
+  playersByNick['__world_meta__'] = { nickname: '__world_meta__', username: '__world_meta__', canteen: canteenLib.ensureTreasury(worldMeta), rehabPoints: 0 };
   const playerRows = Object.entries(playersByNick).map(([nick_key, data]) => ({
     nick_key,
     data,
@@ -699,7 +716,7 @@ function saveDataToJson() {
   for (const p of online.values()) { ensureAccountFields(p); playersByNick[accountKey(p)] = stripTransient(p); }
   fs.writeFileSync(
     DATA_FILE,
-    JSON.stringify({ players: playersByNick, letters: letters.slice(-MAX_LETTERS) }, null, 2)
+    JSON.stringify({ players: playersByNick, letters: letters.slice(-MAX_LETTERS), canteen: canteenLib.ensureTreasury(worldMeta) }, null, 2)
   );
 }
 
@@ -856,6 +873,11 @@ function publicPlayer(p) {
     sentenceParts: sentenceLib.formatRemaining(p),
     violations: (p.violations || []).slice(-12),
     visitorMode: !!p.visitorMode,
+    jobRole: p.jobRole || null,
+    cookUntil: p.cookUntil || 0,
+    labor: p.labor || null,
+    isCanteenSeller: !!(p.jobRole === 'canteen'),
+    isCook: !!(p.jobRole === 'cook' && (p.cookUntil || 0) > Date.now()),
   };
 }
 
@@ -1254,6 +1276,38 @@ setInterval(() => {
   for (const [bid, b] of pendingBets) {
     if (b.exp < now) pendingBets.delete(bid);
   }
+  // canteen: expire slots + NPC soft demand
+  try {
+    const canteen = canteenLib.ensureTreasury(worldMeta);
+    for (const [k, s] of Object.entries(canteen.sellers || {})) {
+      if (s.until <= now) {
+        delete canteen.sellers[k];
+        for (const pl of online.values()) {
+          if (accountKey(pl) === k && pl.jobRole === 'canteen') pl.jobRole = null;
+        }
+      }
+    }
+    const sellers = canteenLib.activeSellers(canteen, now);
+    if (sellers.length && Math.random() < 0.35) {
+      const item = canteenLib.MENU[Math.floor(Math.random() * canteenLib.MENU.length)];
+      const sk = sellers[0].key;
+      const sold = canteenLib.sellItem(canteen, sk, item.id, 'Khách NPC');
+      if (sold.ok) {
+        const sellerPl = [...online.values()].find((x) => accountKey(x) === sk);
+        if (sellerPl) {
+          sellerPl.money = (sellerPl.money || 0) + sold.keep;
+          const se = [...online.entries()].find(([, x]) => x.id === sellerPl.id);
+          if (se) {
+            const sock = io.sockets.sockets.get(se[0]);
+            if (sock) {
+              sock.emit('canteenUpdate', canteenLib.publicView(canteen));
+              emitSelf(sock, sellerPl);
+            }
+          }
+        }
+      }
+    }
+  } catch (_) {}
   broadcastState();
 }, 5000);
 
@@ -1438,6 +1492,10 @@ io.on('connection', (socket) => {
     trial: trialLib.publicQuestionBankMeta(),
     releaseStipend: RELEASE_STIPEND,
     hoursPerYear: 120,
+    canteen: canteenLib.publicView(canteenLib.ensureTreasury(worldMeta)),
+    cooking: { steps: cookingLib.COOK_STEPS, quizSize: 5 },
+    laborChains: laborLib.listChains(),
+
   });
   socket.emit('chatHistory', chatHistory);
   socket.emit('schedule', currentSchedule());
@@ -2040,6 +2098,7 @@ io.on('connection', (socket) => {
         const cut = sentenceLib.applyIntakeCut(p, 'exercise', 30000);
         if (cut.ok) msg = `Thể dục −30s tạm giam! Còn ~${Math.ceil(cut.leftMs/1000)}s.`;
         else if (cut.error) msg = `Hít đất! (${cut.error})`;
+        if (sentenceLib.intakeRemainingMs(p) <= 0) finishIntakeStartTrial(socket, p);
       }
       socket.emit('actionResult', { kind, message: msg });
     } else if (kind === 'wave') {
@@ -2241,7 +2300,16 @@ io.on('connection', (socket) => {
     const p = online.get(socket.id);
     if (!p || p.escaped || p.released) return;
     if (!p.intakeDone && p.role !== 'guard') {
-      socket.emit('errorMsg', 'Hoàn thành nhiệm vụ tiếp nhận ở Khu tạm giam trước đã.');
+      socket.emit('errorMsg', 'Hoàn thành nhiệm vụ tiếp nhận ở Khu tạm giam trước nha.');
+      return;
+    }
+    if ((p.jobRole === 'canteen' || p.jobRole === 'cook') && ['thu_hoach','may_do','moc','lao_dong'].includes(jobId)) {
+      socket.emit('errorMsg', 'Bạn đang bán căn tin / nấu bếp — dùng chức năng tương ứng.');
+      return;
+    }
+    // Encourage chain labor for non-specialists
+    if (!p.jobRole && ['thu_hoach','may_do','moc'].includes(jobId)) {
+      socket.emit('errorMsg', 'Dùng chuỗi lao động mới (Nông trại / May / Mộc / Nặng) trên menu Lao động.');
       return;
     }
     const job = JOBS[jobId];
@@ -2252,7 +2320,7 @@ io.on('connection', (socket) => {
     }
     const now = Date.now();
     if (p.cooldowns[jobId] && p.cooldowns[jobId] > now) { socket.emit('errorMsg', `Chưa hết chờ ${job.name}.`); return; }
-    if (p.energy < job.energyCost) { socket.emit('errorMsg', 'Không đủ năng lượng!'); return; }
+    if (p.energy < job.energyCost) { socket.emit('errorMsg', 'Không đủ năng lượng nha!'); return; }
     p.sleeping = false;
     setEmote(p, job.anim || 'work', 5000);
     const toolBonus = 1 + (p.upgrades.cong_cu || 0) * 0.15;
@@ -2282,7 +2350,7 @@ io.on('connection', (socket) => {
     const shopDisc = rankFromXp(p.rankXp || 0).shopDiscount || 0;
     if (itemId === 'do_an') {
       const foodPrice = Math.max(1, Math.floor(item.price * (1 - shopDisc)));
-      if (p.money < foodPrice) { socket.emit('errorMsg', 'Không đủ tiền!'); return; }
+      if (p.money < foodPrice) { socket.emit('errorMsg', 'Không đủ xu!'); return; }
       p.money -= foodPrice;
       p.health = Math.min(p.maxHealth, p.health + 15);
       p.energy = Math.min(p.maxEnergy, p.energy + 20);
@@ -2294,7 +2362,7 @@ io.on('connection', (socket) => {
     const level = p.upgrades[itemId] || 0;
     if (level >= item.maxLevel) { socket.emit('errorMsg', 'Đã tối đa!'); return; }
     const price = Math.max(1, Math.floor(item.price * (level + 1) * (1 - shopDisc)));
-    if (p.money < price) { socket.emit('errorMsg', 'Không đủ tiền!'); return; }
+    if (p.money < price) { socket.emit('errorMsg', 'Không đủ xu!'); return; }
     p.money -= price;
     p.upgrades[itemId] = level + 1;
     if (itemId === 'giuong') {
@@ -2311,14 +2379,14 @@ io.on('connection', (socket) => {
     if (!p || p.escaped || p.released) return;
     const now = Date.now();
     if ((p.cooldowns.bribe || 0) > now) {
-      socket.emit('errorMsg', 'Cán bộ còn nghi ngờ — đợi chút rồi hối lộ tiếp.');
+      socket.emit('errorMsg', 'Cán bộ còn nghi — chờ tí rồi lo lót tiếp nha.');
       return;
     }
     const g = guards.find((x) => x.id === guardId) || guards.find((x) => {
       const d = Math.hypot(x.x - p.x, x.z - p.z);
       return d < 14;
     }) || guards[2];
-    if (!g) { socket.emit('errorMsg', 'Không thấy cán bộ gần đây.'); return; }
+    if (!g) { socket.emit('errorMsg', 'Không thấy cán bộ gần đây nha.'); return; }
     const price = bribePrice(p);
     if (p.money < price) {
       socket.emit('errorMsg', `Cần ${price}₫ để hối lộ ${g.name}. Bạn chỉ có ${p.money}₫.`);
@@ -2689,6 +2757,228 @@ io.on('connection', (socket) => {
     ensureAccountFields(p);
     playersByNick[accountKey(p)] = stripTransient(p);
     void saveData();
+    emitSelf(socket, p);
+    broadcastState();
+  });
+
+
+  // —— 3d-v14 canteen / cook / labor ——
+  socket.on('canteenBuySlot', () => {
+    const p = online.get(socket.id);
+    if (!p || p.escaped || (p.released && !p.visitorMode) || p.role === 'guard') return;
+    if (!p.intakeDone || !p.trialDone) { socket.emit('errorMsg', 'Xong tạm giam & tòa án trước nha.'); return; }
+    if (p.room !== 'can_tin' && p.room !== 'nha_bep') {
+      socket.emit('errorMsg', 'Ra Khu căn tin để lo lót suất bán.'); return;
+    }
+    const canteen = canteenLib.ensureTreasury(worldMeta);
+    const key = accountKey(p);
+    if ((p.money || 0) < canteenLib.SELLER_SLOT_FEE) {
+      socket.emit('errorMsg', `Cần ${canteenLib.SELLER_SLOT_FEE} xu để lo lót suất bán.`); return;
+    }
+    const chk = canteenLib.canBuySlot(canteen, key);
+    if (!chk.ok) { socket.emit('errorMsg', chk.error); return; }
+    p.money -= canteenLib.SELLER_SLOT_FEE;
+    const bought = canteenLib.buySlot(canteen, key, p.nickname);
+    p.jobRole = 'canteen';
+    p.cookUntil = 0;
+    socket.emit('canteenUpdate', canteenLib.publicView(canteen));
+    socket.emit('actionResult', {
+      kind: 'canteen',
+      message: `Đã lo lót ${bought.fee} xu — nhận suất bán tới ${new Date(bought.until).toLocaleTimeString('vi-VN')}. Giữ 10% doanh thu, 90% nộp kho bạc trại.`,
+    });
+    emitSelf(socket, p);
+    broadcastState();
+    void saveData();
+  });
+
+  socket.on('canteenSell', (payload) => {
+    const p = online.get(socket.id);
+    if (!p || p.jobRole !== 'canteen') { socket.emit('errorMsg', 'Bạn chưa có suất bán căn tin.'); return; }
+    const canteen = canteenLib.ensureTreasury(worldMeta);
+    const key = accountKey(p);
+    if (!canteen.sellers[key] || canteen.sellers[key].until <= Date.now()) {
+      p.jobRole = null;
+      socket.emit('errorMsg', 'Suất bán đã hết hạn.');
+      emitSelf(socket, p);
+      return;
+    }
+    const itemId = payload && payload.itemId;
+    // NPC or player buyer
+    let buyerNick = 'Khách NPC';
+    let buyer = null;
+    if (payload && payload.buyerId) {
+      buyer = [...online.values()].find((x) => x.id === payload.buyerId);
+      if (!buyer) { socket.emit('errorMsg', 'Không thấy khách.'); return; }
+      buyerNick = buyer.nickname;
+    }
+    const item = canteenLib.MENU.find((m) => m.id === itemId);
+    if (!item) { socket.emit('errorMsg', 'Món không hợp lệ.'); return; }
+    if (buyer) {
+      if ((buyer.money || 0) < item.price) { socket.emit('errorMsg', 'Khách không đủ xu.'); return; }
+    }
+    const sold = canteenLib.sellItem(canteen, key, itemId, buyerNick);
+    if (!sold.ok) { socket.emit('errorMsg', sold.error); return; }
+    if (buyer) {
+      buyer.money -= sold.price;
+      buyer.health = Math.min(buyer.maxHealth, (buyer.health || 0) + 8);
+      buyer.energy = Math.min(buyer.maxEnergy, (buyer.energy || 0) + 10);
+      const bent = [...online.entries()].find(([, x]) => x.id === buyer.id);
+      if (bent) emitSelf(io.sockets.sockets.get(bent[0]), buyer);
+    }
+    p.money = (p.money || 0) + sold.keep;
+    p.totalEarned = (p.totalEarned || 0) + sold.keep;
+    p.rehabPoints = (p.rehabPoints || 0) + 1;
+    socket.emit('canteenUpdate', canteenLib.publicView(canteen));
+    socket.emit('actionResult', {
+      kind: 'canteen',
+      message: `Bán ${sold.item.emoji} ${sold.item.name} — giữ ${sold.keep}xu, nộp trại ${sold.remit}xu.`,
+    });
+    emitSelf(socket, p);
+    broadcastState();
+  });
+
+  socket.on('canteenBuyAsCustomer', (payload) => {
+    const p = online.get(socket.id);
+    if (!p || p.escaped) return;
+    const canteen = canteenLib.ensureTreasury(worldMeta);
+    const sellers = canteenLib.activeSellers(canteen);
+    if (!sellers.length) { socket.emit('errorMsg', 'Hiện không có phạm nhân bán căn tin — chờ bếp/NPC.'); return; }
+    // pick first seller
+    const sellerKey = sellers[0].key;
+    const itemId = (payload && payload.itemId) || 'com_suat';
+    const item = canteenLib.MENU.find((m) => m.id === itemId);
+    if (!item) return;
+    if ((p.money || 0) < item.price) { socket.emit('errorMsg', 'Không đủ xu!'); return; }
+    const sold = canteenLib.sellItem(canteen, sellerKey, itemId, p.nickname);
+    if (!sold.ok) { socket.emit('errorMsg', sold.error); return; }
+    p.money -= sold.price;
+    p.health = Math.min(p.maxHealth, p.health + 8);
+    p.energy = Math.min(p.maxEnergy, p.energy + 10);
+    // pay seller keep
+    const sellerPl = [...online.values()].find((x) => accountKey(x) === sellerKey);
+    if (sellerPl) {
+      sellerPl.money = (sellerPl.money || 0) + sold.keep;
+      const se = [...online.entries()].find(([, x]) => x.id === sellerPl.id);
+      if (se) emitSelf(io.sockets.sockets.get(se[0]), sellerPl);
+    }
+    socket.emit('canteenUpdate', canteenLib.publicView(canteen));
+    socket.emit('actionResult', { kind: 'canteen', message: `Mua ${sold.item.name} (−${sold.price}xu).` });
+    emitSelf(socket, p);
+    broadcastState();
+  });
+
+  socket.on('cookQuizStart', () => {
+    const p = online.get(socket.id);
+    if (!p || p.escaped || p.role === 'guard') return;
+    if (!p.intakeDone || !p.trialDone) { socket.emit('errorMsg', 'Xong tạm giam & tòa án trước nha.'); return; }
+    if (p.room !== 'nha_bep') { socket.emit('errorMsg', 'Vào Khu nhà bếp để thi đầu bếp.'); return; }
+    const qs = cookingLib.pickCookQuiz(5);
+    activeCookQuiz.set(socket.id, qs);
+    socket.emit('cookQuiz', {
+      title: 'Thi đầu bếp',
+      message: 'Trả lời đúng 5/5 câu về món Việt / miền Nam để nhận việc nấu bếp.',
+      questions: qs,
+    });
+  });
+
+  socket.on('cookQuizAnswer', (payload) => {
+    const p = online.get(socket.id);
+    if (!p) return;
+    const qs = activeCookQuiz.get(socket.id);
+    if (!qs) { socket.emit('errorMsg', 'Không có bài thi đầu bếp.'); return; }
+    activeCookQuiz.delete(socket.id);
+    const result = cookingLib.gradeCookQuiz((payload && payload.answers) || []);
+    if (!result.pass) {
+      socket.emit('cookQuizResult', { pass: false, correct: result.correct, message: `Chỉ đúng ${result.correct}/5 — chưa đậu đầu bếp. Thi lại nha.` });
+      return;
+    }
+    p.jobRole = 'cook';
+    p.cookUntil = Date.now() + 60 * 60 * 1000;
+    socket.emit('cookQuizResult', { pass: true, correct: 5, message: 'Đậu đầu bếp! Làm chuỗi sơ chế → nấu → nêm → dọn món để tiếp hàng căn tin.' });
+    emitSelf(socket, p);
+    broadcastState();
+  });
+
+  socket.on('cookStep', (payload) => {
+    const p = online.get(socket.id);
+    if (!p || p.jobRole !== 'cook') { socket.emit('errorMsg', 'Bạn chưa phải đầu bếp.'); return; }
+    if ((p.cookUntil || 0) < Date.now()) {
+      p.jobRole = null;
+      socket.emit('errorMsg', 'Ca bếp đã hết — thi lại nếu muốn.');
+      emitSelf(socket, p);
+      return;
+    }
+    if (p.room !== 'nha_bep') { socket.emit('errorMsg', 'Phải ở nhà bếp.'); return; }
+    const scored = cookingLib.scoreCookStep(payload && payload.stepId, payload && payload.taps);
+    if (!scored.ok) { socket.emit('errorMsg', scored.error); return; }
+    if (scored.quality < 50) {
+      socket.emit('actionResult', { kind: 'cook', message: `Bước ${scored.stepId} chưa đạt (${scored.quality}%).` });
+      return;
+    }
+    const pay = 8 + Math.floor(scored.quality / 20);
+    p.money += pay;
+    p.totalEarned += pay;
+    p.rehabPoints = (p.rehabPoints || 0) + 1;
+    p.energy = Math.max(5, (p.energy || 0) - 4);
+    p.workCount = (p.workCount || 0) + 1;
+    if (scored.stepId === 'don') {
+      canteenLib.addStock(canteenLib.ensureTreasury(worldMeta), 'kitchen', 2 + Math.floor(scored.quality / 50));
+      socket.emit('canteenUpdate', canteenLib.publicView(canteenLib.ensureTreasury(worldMeta)));
+    }
+    setEmote(p, 'work', 4000);
+    socket.emit('cookStepResult', { ...scored, pay, message: `Bếp «${scored.stepId}» ${scored.quality}% → +${pay}xu` });
+    emitSelf(socket, p);
+    broadcastState();
+  });
+
+  socket.on('laborStart', (payload) => {
+    const p = online.get(socket.id);
+    if (!p || p.escaped || p.role === 'guard') return;
+    if (!p.intakeDone || !p.trialDone) { socket.emit('errorMsg', 'Xong tạm giam & tòa án trước nha.'); return; }
+    if (p.jobRole === 'canteen' || p.jobRole === 'cook') {
+      socket.emit('errorMsg', 'Đang bán căn tin / nấu bếp — không cần chuỗi lao động bắt buộc.'); return;
+    }
+    const chainId = payload && payload.chainId;
+    const chain = laborLib.CHAINS[chainId];
+    if (!chain) { socket.emit('errorMsg', 'Chọn nông trại / may / mộc / lao động nặng.'); return; }
+    if (p.room !== chain.room && !(chainId === 'heavy' && ['xuong', 'vuon_rau'].includes(p.room))) {
+      socket.emit('errorMsg', `Hãy tới ${ROOM_BY_ID[chain.room]?.name || chain.room} để làm ${chain.name}.`); return;
+    }
+    if ((p.energy || 0) < 8) { socket.emit('errorMsg', 'Không đủ năng lượng nha!'); return; }
+    const started = laborLib.startChain(p, chainId);
+    if (!started.ok) { socket.emit('errorMsg', started.error); return; }
+    socket.emit('laborState', { chain: started.chain, step: started.step, stepIndex: 0 });
+    socket.emit('actionResult', { kind: 'labor', message: `Bắt đầu ${chain.emoji} ${chain.name}: ${started.step.name}` });
+  });
+
+  socket.on('laborStep', (payload) => {
+    const p = online.get(socket.id);
+    if (!p) return;
+    if (p.jobRole === 'canteen' || p.jobRole === 'cook') return;
+    const res = laborLib.advanceStep(p, payload);
+    if (!res.ok) { socket.emit('errorMsg', res.error); return; }
+    p.energy = Math.max(0, (p.energy || 0) - 3);
+    setEmote(p, 'work', 3500);
+    if (res.done) {
+      const pay = res.pay || 0;
+      p.money += pay;
+      p.totalEarned += pay;
+      p.rehabPoints = (p.rehabPoints || 0) + (res.rehab || 2);
+      p.workCount = (p.workCount || 0) + 1;
+      { const dW = v6.ensureDaily(p); dW.dayWork = (dW.dayWork || 0) + 1; }
+      grantRankXp(p, 10, socket);
+      const canteen = canteenLib.ensureTreasury(worldMeta);
+      if (res.stock) {
+        for (const [k, n] of Object.entries(res.stock)) canteenLib.addStock(canteen, k, n);
+      }
+      unlockAchievements(p, socket);
+      socket.emit('canteenUpdate', canteenLib.publicView(canteen));
+      socket.emit('laborState', { done: true, message: res.message });
+      socket.emit('actionResult', { kind: 'labor', message: res.message });
+    } else {
+      socket.emit('laborState', { chainId: res.chainId, step: res.step, stepIndex: res.stepIndex, growReadyAt: res.growReadyAt, message: res.message });
+      socket.emit('actionResult', { kind: 'labor', message: res.message });
+    }
     emitSelf(socket, p);
     broadcastState();
   });

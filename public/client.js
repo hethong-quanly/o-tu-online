@@ -124,6 +124,127 @@
     modal.hidden = false;
   }
 
+
+  let cookTapBuf = [];
+  let laborTapBuf = [];
+  let currentCookStep = null;
+  let currentLaborNeed = 4;
+
+  function renderCanteenModal(data) {
+    data = data || (config.canteen) || {};
+    const meta = $('#canteen-meta');
+    if (meta) meta.textContent = `Lo lót ${data.fee || 800}xu / suất · giữ ${Math.round((data.keepRatio||0.1)*100)}% · kho bạc trại.`;
+    const tr = $('#canteen-treasury');
+    if (tr) tr.textContent = `🏦 Kho bạc trại: ${data.treasury|0} xu`;
+    const st = $('#canteen-stock');
+    if (st && data.stock) st.textContent = `Kho hàng: bếp ${data.stock.kitchen|0} · vườn ${data.stock.farm|0} · may ${data.stock.sewing|0} · mộc ${data.stock.wood|0}`;
+    const menu = $('#canteen-menu');
+    if (menu) {
+      menu.innerHTML = (data.menu || []).map((it) =>
+        `<button type="button" class="btn" data-buy="${it.id}">${it.emoji} ${escapeHtml(it.name)} · ${it.price}xu</button>`
+      ).join('') + (me && me.jobRole === 'canteen'
+        ? (data.menu || []).map((it) =>
+          `<button type="button" class="btn pri" data-sell="${it.id}">Bán ${it.emoji}</button>`).join('')
+        : '');
+      menu.querySelectorAll('[data-buy]').forEach((b) => b.onclick = () => socket.emit('canteenBuyAsCustomer', { itemId: b.dataset.buy }));
+      menu.querySelectorAll('[data-sell]').forEach((b) => b.onclick = () => socket.emit('canteenSell', { itemId: b.dataset.sell }));
+    }
+    const led = $('#canteen-ledger');
+    if (led) {
+      led.innerHTML = (data.ledger || []).slice(0, 10).map((e) =>
+        `<div>• ${escapeHtml(e.note || e.type)} ${e.amount != null ? e.amount + 'xu' : ''} ${e.price != null ? e.price + 'xu' : ''}</div>`
+      ).join('') || '<div class="meta">Chưa có giao dịch</div>';
+    }
+  }
+
+  function bindV14Jobs() {
+    const openC = () => {
+      renderCanteenModal(config.canteen);
+      const m = $('#canteen-modal'); if (m) m.hidden = false;
+    };
+    ['#dock-canteen'].forEach((s) => { const el = $(s); if (el) el.onclick = openC; });
+    const slot = $('#btn-canteen-slot');
+    if (slot) slot.onclick = () => socket.emit('canteenBuySlot');
+    const cc = $('#btn-canteen-close');
+    if (cc) cc.onclick = () => { $('#canteen-modal').hidden = true; };
+
+    const openCook = () => {
+      if (me && me.jobRole === 'cook') {
+        const box = $('#cook-steps');
+        const steps = (config.cooking && config.cooking.steps) || [];
+        box.innerHTML = steps.map((s) =>
+          `<button type="button" class="btn" data-cs="${s.id}">${s.emoji} ${escapeHtml(s.name)}</button>`
+        ).join('');
+        box.querySelectorAll('[data-cs]').forEach((b) => {
+          b.onclick = () => {
+            currentCookStep = b.dataset.cs;
+            cookTapBuf = [];
+            const st = steps.find((x) => x.id === currentCookStep);
+            $('#cook-step-hint').textContent = (st && st.hint) || 'Chạm!';
+            $('#cook-tap-score').textContent = '0 / ' + ((st && st.taps) || 0);
+          };
+        });
+        $('#cook-chain-modal').hidden = false;
+      } else {
+        socket.emit('cookQuizStart');
+      }
+    };
+    const dc = $('#dock-cook'); if (dc) dc.onclick = openCook;
+    const cqs = $('#btn-cook-quiz-submit');
+    if (cqs) cqs.onclick = () => {
+      const answers = $$('#cook-quiz-questions .trial-q').map((row) => {
+        const id = row.getAttribute('data-qid');
+        const sel = row.querySelector('input[type=radio]:checked');
+        return { id, choiceIndex: sel ? Number(sel.value) : -1 };
+      });
+      socket.emit('cookQuizAnswer', { answers });
+    };
+    const cqc = $('#btn-cook-quiz-close');
+    if (cqc) cqc.onclick = () => { $('#cook-quiz-modal').hidden = true; };
+    const tap = $('#btn-cook-tap');
+    if (tap) tap.onclick = () => {
+      if (!currentCookStep) { toast('Chọn bước bếp trước'); return; }
+      cookTapBuf.push({ ok: true });
+      const steps = (config.cooking && config.cooking.steps) || [];
+      const st = steps.find((x) => x.id === currentCookStep);
+      $('#cook-tap-score').textContent = cookTapBuf.length + ' / ' + ((st && st.taps) || 0);
+      if (st && cookTapBuf.length >= st.taps) {
+        socket.emit('cookStep', { stepId: currentCookStep, taps: cookTapBuf.slice() });
+        cookTapBuf = [];
+      }
+    };
+    const ccc = $('#btn-cook-chain-close');
+    if (ccc) ccc.onclick = () => { $('#cook-chain-modal').hidden = true; };
+
+    const openLabor = () => {
+      const box = $('#labor-chains');
+      const chains = config.laborChains || [];
+      box.innerHTML = chains.map((c) =>
+        `<button type="button" class="btn" data-lc="${c.id}">${c.emoji} ${escapeHtml(c.name)}</button>`
+      ).join('');
+      box.querySelectorAll('[data-lc]').forEach((b) => {
+        b.onclick = () => {
+          laborTapBuf = [];
+          socket.emit('laborStart', { chainId: b.dataset.lc });
+        };
+      });
+      $('#labor-step-box').hidden = true;
+      $('#labor-modal').hidden = false;
+    };
+    const dl = $('#dock-labor'); if (dl) dl.onclick = openLabor;
+    const lt = $('#btn-labor-tap');
+    if (lt) lt.onclick = () => {
+      laborTapBuf.push({ ok: Math.random() > 0.15 });
+      $('#labor-tap-score').textContent = laborTapBuf.filter((t) => t.ok).length + ' / ' + currentLaborNeed;
+      if (laborTapBuf.length >= currentLaborNeed) {
+        socket.emit('laborStep', { taps: laborTapBuf.slice() });
+        laborTapBuf = [];
+      }
+    };
+    const lc = $('#btn-labor-close');
+    if (lc) lc.onclick = () => { $('#labor-modal').hidden = true; };
+  }
+
   function bindV13Actions() {
     const map = [
       ['#dock-provoke', '#mob-provoke', 'provoke'],
@@ -1505,6 +1626,7 @@
 
   socket.on('config', (c) => {
     config = { ...config, ...c };
+    if (c.canteen) config.canteen = c.canteen;
     fillSelects();
     buildSwatches();
     drawPreview();
@@ -1525,6 +1647,8 @@
     }
     fillSecuritySelects();
     bindV13Actions();
+    bindV14Jobs();
+    if (c.canteen) config.canteen = c.canteen;
     const sess = loadSession();
     const su = sessionUsername(sess);
     if (su && $('#login-nick')) $('#login-nick').value = su;
@@ -1611,6 +1735,60 @@
   socket.on('violationCaught', (info) => {
     toast('🚨 Vi phạm bị ghi sổ — án tăng!');
   });
+
+  socket.on('canteenUpdate', (data) => {
+    config.canteen = data;
+    if ($('#canteen-modal') && !$('#canteen-modal').hidden) renderCanteenModal(data);
+  });
+  socket.on('cookQuiz', (info) => {
+    const modal = $('#cook-quiz-modal');
+    const box = $('#cook-quiz-questions');
+    if (!modal || !box) return;
+    $('#cook-quiz-title').textContent = (info && info.title) || 'Thi đầu bếp';
+    $('#cook-quiz-hint').textContent = (info && info.message) || '';
+    box.innerHTML = (info.questions || []).map((q, i) => `
+      <div class="trial-q" data-qid="${escapeHtml(q.id)}" style="text-align:left;margin:8px 0;padding:8px;border:1px solid #333;border-radius:8px">
+        <div><b>Câu ${i + 1}.</b> ${escapeHtml(q.q)}</div>
+        ${(q.choices || []).map((c, ci) => `
+          <label style="display:block;margin:4px 0;font-size:13px">
+            <input type="radio" name="cq_${escapeHtml(q.id)}" value="${ci}" /> ${escapeHtml(c)}
+          </label>`).join('')}
+      </div>`).join('');
+    modal.hidden = false;
+  });
+  socket.on('cookQuizResult', (info) => {
+    toast((info && info.message) || 'Kết quả thi bếp');
+    if (info && info.pass) {
+      $('#cook-quiz-modal').hidden = true;
+      const dc = $('#dock-cook'); if (dc) dc.click();
+    }
+  });
+  socket.on('cookStepResult', (info) => {
+    toast((info && info.message) || 'Bếp');
+  });
+  socket.on('laborState', (info) => {
+    if (!info) return;
+    if (info.done) {
+      toast(info.message || 'Xong chuỗi lao động');
+      $('#labor-step-box').hidden = true;
+      return;
+    }
+    if (info.step) {
+      $('#labor-step-box').hidden = false;
+      $('#labor-step-title').textContent = `${info.step.emoji || ''} ${info.step.name}`;
+      currentLaborNeed = info.step.taps || 4;
+      laborTapBuf = [];
+      let hint = 'Chạm đủ số lần để hoàn thành bước.';
+      if (info.growReadyAt && info.growReadyAt > Date.now()) {
+        hint = `Chờ cây lớn ~${Math.ceil((info.growReadyAt - Date.now())/1000)}s rồi thu hoạch.`;
+      }
+      $('#labor-step-hint').textContent = hint;
+      $('#labor-tap-score').textContent = '0 / ' + currentLaborNeed;
+      $('#labor-modal').hidden = false;
+    }
+    if (info.message) toast(info.message);
+  });
+
   socket.on('violationFx', (fx) => {
     if (!fx) return;
     if (fx.kind === 'fight' && world3d && !world3d.fallback) {

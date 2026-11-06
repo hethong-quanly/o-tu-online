@@ -238,6 +238,9 @@
     <button type="button" id="dock-fight"><span>🥊</span><small>Đánh lộn</small></button>
     <button type="button" id="dock-bet"><span>🎲</span><small>Cá độ</small></button>
     <button type="button" id="dock-gift"><span>🎁</span><small>Tặng quà</small></button>
+    <button type="button" id="dock-canteen"><span>🍽️</span><small>Căn tin</small></button>
+    <button type="button" id="dock-cook"><span>👨‍🍳</span><small>Bếp</small></button>
+    <button type="button" id="dock-labor"><span>🏭</span><small>Lao động</small></button>
     <button type="button" data-act="letter"><span>✉️</span><small>Viết thư</small></button>
     <button type="button" data-act="mark_day"><span>✏️</span><small>Gạch</small></button>
     <button type="button" id="dock-chat"><span>💬</span><small>Chat</small></button>
@@ -277,7 +280,7 @@
   <div id="perform-rhythm" class="overlay-panel" hidden>
     <div class="panel-card rhythm-card">
       <h2 id="rhythm-title">🎤 Ca hát</h2>
-      <p class="meta" id="rhythm-hint">Chạm theo nhịp!</p>
+      <p class="meta" id="rhythm-hint">Chạm theo nhịp nha!</p>
       <div class="rhythm-track" id="rhythm-track"><div class="rhythm-hitline"></div></div>
       <button type="button" class="btn pri big" id="rhythm-tap">CHẠM</button>
       <div class="meta" id="rhythm-score">0 / 0</div>
@@ -359,12 +362,63 @@
     </div>
   </div>
 
+
+  <div id="canteen-modal" class="overlay-panel" hidden>
+    <div class="panel-card join-card" style="max-width:460px;max-height:88vh;overflow:auto">
+      <h2>🍽️ Căn tin trại</h2>
+      <p class="meta" id="canteen-meta">Lo lót suất bán · giữ 10% · 90% nộp kho bạc.</p>
+      <div id="canteen-treasury" class="meta"></div>
+      <div id="canteen-stock" class="meta"></div>
+      <div id="canteen-menu" class="perform-kinds"></div>
+      <button type="button" class="btn pri big" id="btn-canteen-slot">Lo lót lấy suất bán</button>
+      <button type="button" class="btn" id="btn-canteen-close">Đóng</button>
+      <h3 style="margin-top:12px">Sổ kho bạc</h3>
+      <div id="canteen-ledger" class="meta" style="text-align:left;font-size:12px"></div>
+    </div>
+  </div>
+
+  <div id="cook-quiz-modal" class="overlay-panel" hidden>
+    <div class="panel-card join-card" style="max-width:480px;max-height:88vh;overflow:auto">
+      <h2 id="cook-quiz-title">Thi đầu bếp</h2>
+      <p class="meta" id="cook-quiz-hint">Đúng 5/5 mới đậu.</p>
+      <div id="cook-quiz-questions"></div>
+      <button type="button" class="btn pri big" id="btn-cook-quiz-submit">Nộp bài</button>
+      <button type="button" class="btn" id="btn-cook-quiz-close">Đóng</button>
+    </div>
+  </div>
+
+  <div id="cook-chain-modal" class="overlay-panel" hidden>
+    <div class="panel-card" style="max-width:420px">
+      <h2>👨‍🍳 Ca bếp</h2>
+      <div id="cook-steps" class="perform-kinds"></div>
+      <p class="meta" id="cook-step-hint">Chọn bước · chạm theo yêu cầu</p>
+      <button type="button" class="btn pri big" id="btn-cook-tap">CHẠM</button>
+      <div class="meta" id="cook-tap-score">0</div>
+      <button type="button" class="btn" id="btn-cook-chain-close">Đóng</button>
+    </div>
+  </div>
+
+  <div id="labor-modal" class="overlay-panel" hidden>
+    <div class="panel-card join-card" style="max-width:460px;max-height:88vh;overflow:auto">
+      <h2>🏭 Lao động</h2>
+      <p class="meta">Không bán căn tin / không nấu bếp thì phải đi lao động theo chuỗi.</p>
+      <div id="labor-chains" class="perform-kinds"></div>
+      <div id="labor-step-box" hidden>
+        <h3 id="labor-step-title">—</h3>
+        <p class="meta" id="labor-step-hint"></p>
+        <button type="button" class="btn pri big" id="btn-labor-tap">Làm việc</button>
+        <div class="meta" id="labor-tap-score">0</div>
+      </div>
+      <button type="button" class="btn" id="btn-labor-close">Đóng</button>
+    </div>
+  </div>
   <div id="help-modal" class="overlay-panel" hidden>
     <div class="panel-card help-card">
       <h2>Hướng dẫn</h2>
       <ul class="help-list">
         <li><b>Bản đồ:</b> phím <b>M</b> / nút 🗺️ — minimap góc phải, bản đồ đầy đủ có nhãn khu.</li>
         <li><b>Khu tạm giam:</b> 120 giây. Thể dục / Nói chuyện / Tặng quà mỗi loại −30s (một lần). Hết giờ → Tòa án 5 câu hỏi.</li>
+        <li><b>Căn tin / Bếp:</b> Lo lót suất bán (giữ 10%); thi 5 câu để nấu bếp; còn lại phải lao động chuỗi.</li>
         <li><b>Lao động:</b> thu hoạch rau, may quần áo, đóng tủ/bàn/ghế tại khu lao động (đúng giờ lao động).</li>
         <li><b>Phòng hạnh phúc:</b> mở khi hoàn thành 100% nhiệm vụ — gặp mặt gia đình (lành mạnh), nhận buff.</li>
         <li><b>Di chuyển:</b> WASD / phím mũi tên, chạm sàn, hoặc joystick trên điện thoại. Shift = chạy.</li>
@@ -378,7 +432,7 @@
         <li><b>Âm thanh:</b> nhạc nền / SFX (nút góc phải). Trên điện thoại cần chạm 1 lần để bật loa.</li>
         <li><b>Mãn hạn</b> = lễ ra tù + BXH ra tù sớm.</li>
       </ul>
-      <button id="btn-help-ok" class="btn pri big" type="button">Đã hiểu</button>
+      <button id="btn-help-ok" class="btn pri big" type="button">Hiểu rồi nha</button>
     </div>
   </div>
 
@@ -433,7 +487,7 @@
   <script>
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {
-        navigator.serviceWorker.register('/sw.js?v=3d-v13', { updateViaCache: 'none' })
+        navigator.serviceWorker.register('/sw.js?v=3d-v14', { updateViaCache: 'none' })
           .then((reg) => { try { reg.update(); } catch (_) {} })
           .catch(() => {});
       });

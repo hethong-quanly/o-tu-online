@@ -8,7 +8,7 @@ Artifact đã build (không gồm keystore):
 - `dist/android/o-tu-online-2.0.0.aab` — upload Google Play
 - `dist/android/o-tu-online-2.0.0.apk` — thử máy / sideload / GitHub Releases
 
-Keystore upload nằm **chỉ** tại `android-keys/` (đã gitignore, chmod 600). Không bao giờ commit hoặc đính kèm release.
+Keystore upload nằm **chỉ** tại `android-keys/` (đã gitignore, chmod 600). Không khi nào commit hoặc đính kèm release.
 
 Chính sách quyền riêng tư: https://o-tu-online.onrender.com/privacy  
 Nội dung listing (tiếng Việt): `store/listing-vi.txt`
