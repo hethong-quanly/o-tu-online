@@ -22,7 +22,7 @@ const supabase = useSupabase
   : null;
 const MAX_PLAYERS = Math.max(1, parseInt(process.env.MAX_PLAYERS || '10000', 10) || 10000);
 const NPC_COUNT = Math.max(0, parseInt(process.env.NPC_COUNT || '16', 10) || 16);
-const VERSION = '3d-v11';
+const VERSION = '3d-v12';
 
 /** Guard NPCs — patrol, vision, bribe window (in-game money only) */
 const GUARD_DEFS = [
@@ -423,8 +423,14 @@ function defaultPlayer(payload, socketId) {
   const cell = v6.pickCell(online, ROOMS);
   return {
     id: socketId,
+    username: payload.username || payload.nickname,
     nickname: payload.nickname,
-    fullName: String(payload.fullName || payload.nickname).trim().slice(0, 40),
+    nicknameChosen: !!payload.nicknameChosen,
+    securityQuestionId: payload.securityQuestionId || null,
+    securityAnswerHash: payload.securityAnswerHash || null,
+    passwordHash: null,
+    authSessions: [],
+    fullName: String(payload.fullName || payload.nickname || payload.username).trim().slice(0, 40),
     prisonerNo: prisonerNumber(),
     crimeId: crime.id,
     crimeLabel,
@@ -537,6 +543,42 @@ function stripTransient(p) {
   return { ...rest, cooldowns: {}, sleeping: false, emote: null, bribeGuardId: null, bribeUntil: 0, activeShowId: null };
 }
 
+
+function accountKey(p) {
+  return String((p && (p.username || p.nickname)) || '').toLowerCase();
+}
+
+function ensureAccountFields(p) {
+  if (!p || typeof p !== 'object') return p;
+  if (!p.username) {
+    p.username = p.nickname;
+    if (p.nicknameChosen == null) p.nicknameChosen = true;
+  }
+  if (p.nicknameChosen == null) p.nicknameChosen = true;
+  if (p.securityQuestionId == null) p.securityQuestionId = null;
+  if (p.securityAnswerHash == null) p.securityAnswerHash = null;
+  return p;
+}
+
+function isNicknameTaken(nick, exceptKey) {
+  const want = String(nick || '').toLowerCase();
+  if (!want) return false;
+  for (const [key, pl] of Object.entries(playersByNick)) {
+    if (exceptKey && key === exceptKey) continue;
+    ensureAccountFields(pl);
+    if (String(pl.nickname || '').toLowerCase() === want) return true;
+    if (String(pl.username || '').toLowerCase() === want && key !== exceptKey) return true;
+  }
+  for (const pl of online.values()) {
+    ensureAccountFields(pl);
+    const k = accountKey(pl);
+    if (exceptKey && k === exceptKey) continue;
+    if (String(pl.nickname || '').toLowerCase() === want) return true;
+  }
+  return false;
+}
+
+
 function clientIp(socket) {
   const xf = (socket.handshake.headers['x-forwarded-for'] || '').split(',')[0].trim();
   return xf || socket.handshake.address || 'unknown';
@@ -547,6 +589,7 @@ function loadDataFromJson() {
   if (!fs.existsSync(DATA_FILE)) return;
   const raw = JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
   playersByNick = raw.players || raw || {};
+  for (const k of Object.keys(playersByNick)) ensureAccountFields(playersByNick[k]);
   if (Array.isArray(raw.letters)) {
     letters.length = 0;
     letters.push(...raw.letters.slice(-MAX_LETTERS));
@@ -556,7 +599,7 @@ function loadDataFromJson() {
 function leaderboardStatsRow(p) {
   const rank = rankFromXp(p.rankXp || 0);
   return {
-    nick_key: String(p.nickname || '').toLowerCase(),
+    nick_key: accountKey(p),
     nickname: p.nickname,
     full_name: p.fullName || p.nickname,
     money: Math.floor(p.money || 0),
@@ -579,7 +622,8 @@ async function loadDataFromSupabase() {
   playersByNick = {};
   for (const row of rows || []) {
     if (row && row.nick_key && row.data && typeof row.data === 'object') {
-      playersByNick[row.nick_key] = row.data;
+      const data = ensureAccountFields(row.data || {});
+      playersByNick[row.nick_key] = data;
     }
   }
   const { data: letterRows, error: le } = await supabase
@@ -597,7 +641,7 @@ async function loadDataFromSupabase() {
 }
 
 async function saveDataToSupabase() {
-  for (const p of online.values()) playersByNick[p.nickname.toLowerCase()] = stripTransient(p);
+  for (const p of online.values()) { ensureAccountFields(p); playersByNick[accountKey(p)] = stripTransient(p); }
   // Never re-upsert smoke-test accounts
   for (const key of Object.keys(playersByNick)) {
     if (isTestNickKey(key)) delete playersByNick[key];
@@ -630,7 +674,7 @@ async function saveDataToSupabase() {
 
 function saveDataToJson() {
   ensureDataDir();
-  for (const p of online.values()) playersByNick[p.nickname.toLowerCase()] = stripTransient(p);
+  for (const p of online.values()) { ensureAccountFields(p); playersByNick[accountKey(p)] = stripTransient(p); }
   fs.writeFileSync(
     DATA_FILE,
     JSON.stringify({ players: playersByNick, letters: letters.slice(-MAX_LETTERS) }, null, 2)
@@ -704,7 +748,11 @@ function publicPlayer(p) {
   const rating = ratingFromPoints(p.rehabPoints || 0);
   return {
     id: p.id,
+    username: p.username || p.nickname,
     nickname: p.nickname,
+    nicknameChosen: !!p.nicknameChosen,
+    needsNickname: !p.nicknameChosen,
+    needsSecurity: !(p.securityQuestionId && p.securityAnswerHash),
     fullName: p.fullName || p.nickname,
     prisonerNo: p.prisonerNo,
     crimeLabel: p.crimeLabel,
@@ -779,7 +827,7 @@ function publicPlayer(p) {
 
 function leaderboard() {
   const all = { ...playersByNick };
-  for (const p of online.values()) all[p.nickname.toLowerCase()] = stripTransient(p);
+  for (const p of online.values()) { ensureAccountFields(p); all[accountKey(p)] = stripTransient(p); }
   const list = Object.values(all).map((p) => {
     const rank = rankFromXp(p.rankXp || 0);
     return {
@@ -1012,7 +1060,7 @@ function tryRelease(p, socket, reason) {
   p.earlyRelease = (p.daysServed || 0) < (p.sentenceTotalDays || 0);
   p.releasedAt = Date.now();
   p.sentenceLeftDays = 0;
-  playersByNick[p.nickname.toLowerCase()] = stripTransient(p);
+  ensureAccountFields(p); playersByNick[accountKey(p)] = stripTransient(p);
   saveData();
   const msg = p.earlyRelease
     ? `🕊️ ${p.nickname} được RA TÙ SỚM nhờ cải tạo tốt! (${p.daysServed}/${p.sentenceTotalDays} ngày)`
@@ -1261,6 +1309,7 @@ io.on('connection', (socket) => {
     intakeNeedMs: v6.INTAKE_NEED_MS,
     schedule: currentSchedule(), dayTickMs: DAY_TICK_MS, reviewEveryDays: REVIEW_EVERY_DAYS,
     maxPlayers: MAX_PLAYERS, npcCount: NPC_COUNT, version: VERSION,
+    securityQuestions: auth.SECURITY_QUESTIONS,
   });
   socket.emit('chatHistory', chatHistory);
   socket.emit('schedule', currentSchedule());
@@ -1273,12 +1322,18 @@ io.on('connection', (socket) => {
     playersByNick[key] = stripTransient(p);
     void saveData();
     emitSelf(socket, p);
+    ensureAccountFields(p);
     const payload = {
+      username: p.username || p.nickname,
       nickname: p.nickname,
+      nicknameChosen: !!p.nicknameChosen,
+      needsNickname: !p.nicknameChosen,
+      needsSecurity: !(p.securityQuestionId && p.securityAnswerHash),
       appearance: p.appearance,
       prisonerNo: p.prisonerNo,
       sessionToken: sessionToken || null,
       hasPassword: !!p.passwordHash,
+      securityQuestions: auth.SECURITY_QUESTIONS,
     };
     socket.emit('joined', payload);
     pushChat({
@@ -1307,8 +1362,14 @@ io.on('connection', (socket) => {
         activeShowId: null,
       };
       // keep auth fields from saved
+      ensureAccountFields(saved);
+      p.username = saved.username || nickname;
+      p.nickname = saved.nickname || nickname;
+      p.nicknameChosen = saved.nicknameChosen != null ? !!saved.nicknameChosen : true;
       p.passwordHash = saved.passwordHash || null;
       p.authSessions = Array.isArray(saved.authSessions) ? saved.authSessions.slice() : [];
+      p.securityQuestionId = saved.securityQuestionId || null;
+      p.securityAnswerHash = saved.securityAnswerHash || null;
       if (payload.appearance && payload.mode === 'register') p.appearance = normalizeAppearance(payload.appearance);
       else p.appearance = normalizeAppearance(p.appearance);
       if (!p.prisonerNo) p.prisonerNo = prisonerNumber();
@@ -1322,6 +1383,7 @@ io.on('connection', (socket) => {
       p.health = Math.min(p.health, p.maxHealth);
       if (p.x == null) { p.x = ROOM_BY_ID[p.room]?.x || 0; p.z = ROOM_BY_ID[p.room]?.z || 0; }
     } else if (saved && (saved.escaped || saved.released)) {
+      ensureAccountFields(saved);
       p = defaultPlayer(incoming, socket.id);
       p.reputation = Math.max(0, (saved.reputation || 0) - 5);
       p.gameWins = saved.gameWins || 0;
@@ -1329,12 +1391,22 @@ io.on('connection', (socket) => {
       p.winsRps = saved.winsRps || 0;
       p.rankXp = saved.rankXp || 0;
       p.rankId = rankFromXp(p.rankXp).id;
+      p.username = saved.username || nickname;
+      p.nickname = saved.nickname || nickname;
+      p.nicknameChosen = saved.nicknameChosen != null ? !!saved.nicknameChosen : true;
       p.passwordHash = saved.passwordHash || null;
       p.authSessions = Array.isArray(saved.authSessions) ? saved.authSessions.slice() : [];
+      p.securityQuestionId = saved.securityQuestionId || null;
+      p.securityAnswerHash = saved.securityAnswerHash || null;
     } else {
       p = defaultPlayer(incoming, socket.id);
-      p.passwordHash = null;
+      p.username = payload.username || nickname;
+      p.nickname = nickname;
+      p.nicknameChosen = !!payload.nicknameChosen;
+      p.passwordHash = payload.passwordHash || null;
       p.authSessions = [];
+      p.securityQuestionId = payload.securityQuestionId || null;
+      p.securityAnswerHash = payload.securityAnswerHash || null;
     }
     p.rankXp = p.rankXp || 0;
     p.rankId = rankFromXp(p.rankXp).id;
@@ -1393,26 +1465,24 @@ io.on('connection', (socket) => {
   socket.on('login', async (payload) => {
     try {
       payload = payload || {};
-      let nickname = String(payload.nickname || '').trim().slice(0, 16).replace(/[<>]/g, '');
-      if (!nickname || nickname.length < 2) {
-        socket.emit('errorMsg', 'Biệt danh phải từ 2–16 ký tự.');
-        return;
-      }
-      const key = nickname.toLowerCase();
+      let username = String(payload.username || payload.nickname || '').trim().slice(0, 16).replace(/[<>]/g, '');
+      const uerr = auth.validateUsername(username);
+      if (uerr) { socket.emit('errorMsg', uerr); return; }
+      const key = username.toLowerCase();
       const ip = clientIp(socket);
       const rate = auth.checkLoginRate(key, ip);
       if (!rate.ok) {
         socket.emit('errorMsg', `Đăng nhập bị khóa tạm — thử lại sau ${Math.ceil(rate.retryAfterMs / 1000)}s.`);
         return;
       }
-      const saved = playersByNick[key];
+      const saved = ensureAccountFields(playersByNick[key]);
       if (!saved) {
         auth.recordLoginFail(key, ip);
         socket.emit('errorMsg', 'Không tìm thấy tài khoản. Hãy tạo nhân vật mới.');
         return;
       }
       const alreadyOnline = [...online.values()].some(
-        (pl) => pl.nickname.toLowerCase() === key && pl.id !== socket.id
+        (pl) => accountKey(pl) === key && pl.id !== socket.id
       );
       if (alreadyOnline) {
         socket.emit('errorMsg', 'Tài khoản đang online trên thiết bị khác.');
@@ -1423,15 +1493,15 @@ io.on('connection', (socket) => {
         return;
       }
 
-      // Legacy account without password — ask client to claim
       if (!saved.passwordHash) {
         if (payload.sessionToken && auth.verifySession(saved, payload.sessionToken)) {
           /* ok */
         } else {
           auth.clearLoginFails(key, ip);
           socket.emit('needClaim', {
-            nickname: saved.nickname || nickname,
-            fullName: saved.fullName || nickname,
+            username: saved.username || username,
+            nickname: saved.nickname || username,
+            fullName: saved.fullName || username,
             message: 'Tài khoản cũ chưa có mật khẩu. Đặt mật khẩu để bảo vệ tiến trình.',
           });
           return;
@@ -1448,13 +1518,15 @@ io.on('connection', (socket) => {
         const ok = await auth.verifyPassword(pw, saved.passwordHash);
         if (!ok) {
           auth.recordLoginFail(key, ip);
-          socket.emit('errorMsg', 'Sai biệt danh hoặc mật khẩu.');
+          socket.emit('errorMsg', 'Sai tên đăng nhập hoặc mật khẩu.');
           return;
         }
       }
       auth.clearLoginFails(key, ip);
-      const fullName = saved.fullName || nickname;
-      const p = materializePlayer(socket, { ...payload, mode: 'login' }, nickname, fullName, saved, key);
+      const fullName = saved.fullName || saved.nickname || username;
+      const displayNick = saved.nickname || username;
+      const p = materializePlayer(socket, { ...payload, mode: 'login', username }, displayNick, fullName, saved, key);
+      ensureAccountFields(p);
       const sess = auth.issueSession(p);
       await enterGame(socket, p, key, { isNew: false, sessionToken: sess.token });
     } catch (e) {
@@ -1466,15 +1538,15 @@ io.on('connection', (socket) => {
   socket.on('claimPassword', async (payload) => {
     try {
       payload = payload || {};
-      let nickname = String(payload.nickname || '').trim().slice(0, 16).replace(/[<>]/g, '');
-      const key = nickname.toLowerCase();
+      let username = String(payload.username || payload.nickname || '').trim().slice(0, 16).replace(/[<>]/g, '');
+      const key = username.toLowerCase();
       const ip = clientIp(socket);
       const rate = auth.checkLoginRate(key, ip);
       if (!rate.ok) {
         socket.emit('errorMsg', `Thử lại sau ${Math.ceil(rate.retryAfterMs / 1000)}s.`);
         return;
       }
-      const saved = playersByNick[key];
+      const saved = ensureAccountFields(playersByNick[key]);
       if (!saved) {
         socket.emit('errorMsg', 'Không tìm thấy tài khoản.');
         return;
@@ -1486,7 +1558,7 @@ io.on('connection', (socket) => {
       const err = auth.validatePasswordStrength(payload.password);
       if (err) { socket.emit('errorMsg', err); return; }
       const alreadyOnline = [...online.values()].some(
-        (pl) => pl.nickname.toLowerCase() === key && pl.id !== socket.id
+        (pl) => accountKey(pl) === key && pl.id !== socket.id
       );
       if (alreadyOnline) {
         socket.emit('errorMsg', 'Tài khoản đang online.');
@@ -1494,11 +1566,25 @@ io.on('connection', (socket) => {
       }
       saved.passwordHash = await auth.hashPassword(String(payload.password));
       saved.authSessions = [];
+      // optional security at claim time
+      if (payload.securityQuestionId && payload.securityAnswer) {
+        const q = auth.questionById(payload.securityQuestionId);
+        if (!q) { socket.emit('errorMsg', 'Câu hỏi bảo mật không hợp lệ.'); return; }
+        try {
+          saved.securityQuestionId = q.id;
+          saved.securityAnswerHash = await auth.hashSecurityAnswer(payload.securityAnswer);
+        } catch {
+          socket.emit('errorMsg', 'Câu trả lời bảo mật phải từ 2 ký tự.');
+          return;
+        }
+      }
       playersByNick[key] = saved;
       auth.clearLoginFails(key, ip);
-      const fullName = saved.fullName || nickname;
-      const p = materializePlayer(socket, { ...payload, mode: 'login' }, nickname, fullName, saved, key);
+      const fullName = saved.fullName || saved.nickname || username;
+      const p = materializePlayer(socket, { ...payload, mode: 'login', username }, saved.nickname || username, fullName, saved, key);
       p.passwordHash = saved.passwordHash;
+      p.securityQuestionId = saved.securityQuestionId;
+      p.securityAnswerHash = saved.securityAnswerHash;
       const sess = auth.issueSession(p);
       await enterGame(socket, p, key, { isNew: false, sessionToken: sess.token });
     } catch (e) {
@@ -1510,14 +1596,16 @@ io.on('connection', (socket) => {
   socket.on('register', async (payload) => {
     try {
       payload = payload || {};
-      let nickname = String(payload.nickname || '').trim().slice(0, 16).replace(/[<>]/g, '');
-      if (!nickname || nickname.length < 2) {
-        socket.emit('errorMsg', 'Biệt danh phải từ 2–16 ký tự.');
+      let username = String(payload.username || payload.nickname || '').trim().slice(0, 16).replace(/[<>]/g, '');
+      const uerr = auth.validateUsername(username);
+      if (uerr) { socket.emit('errorMsg', uerr); return; }
+      const key = username.toLowerCase();
+      if (playersByNick[key]) {
+        socket.emit('errorMsg', 'Tên đăng nhập đã tồn tại. Hãy đăng nhập.');
         return;
       }
-      const key = nickname.toLowerCase();
-      if (playersByNick[key]) {
-        socket.emit('errorMsg', 'Biệt danh đã tồn tại. Hãy đăng nhập.');
+      if (isNicknameTaken(username, null)) {
+        socket.emit('errorMsg', 'Tên đăng nhập đã được dùng làm biệt danh. Chọn tên khác.');
         return;
       }
       const registered = Object.keys(playersByNick).length;
@@ -1529,22 +1617,51 @@ io.on('connection', (socket) => {
         socket.emit('errorMsg', `Đã đủ ${MAX_PLAYERS.toLocaleString('vi-VN')} tù nhân đăng ký.`);
         return;
       }
-      const fullName = String(payload.fullName || nickname).trim().slice(0, 40).replace(/[<>]/g, '');
+      const fullName = String(payload.fullName || username).trim().slice(0, 40).replace(/[<>]/g, '');
       if (!fullName || fullName.length < 2) {
         socket.emit('errorMsg', 'Họ tên phải từ 2 ký tự.');
         return;
       }
       const err = auth.validatePasswordStrength(payload.password);
       if (err) { socket.emit('errorMsg', err); return; }
-      const taken = [...online.values()].some(
-        (pl) => pl.nickname.toLowerCase() === key && pl.id !== socket.id
-      );
-      if (taken) {
-        socket.emit('errorMsg', 'Biệt danh đang online. Chọn tên khác.');
+      const q = auth.questionById(payload.securityQuestionId);
+      if (!q) { socket.emit('errorMsg', 'Chọn câu hỏi bảo mật.'); return; }
+      let securityAnswerHash;
+      try {
+        securityAnswerHash = await auth.hashSecurityAnswer(payload.securityAnswer);
+      } catch {
+        socket.emit('errorMsg', 'Câu trả lời bảo mật phải từ 2 ký tự.');
         return;
       }
-      const p = materializePlayer(socket, { ...payload, mode: 'register' }, nickname, fullName, null, key);
+      const taken = [...online.values()].some(
+        (pl) => accountKey(pl) === key && pl.id !== socket.id
+      );
+      if (taken) {
+        socket.emit('errorMsg', 'Tên đăng nhập đang online. Chọn tên khác.');
+        return;
+      }
+      // Temporary display nick = username until player sets biệt danh in-game
+      const p = materializePlayer(
+        socket,
+        {
+          ...payload,
+          mode: 'register',
+          username,
+          nicknameChosen: false,
+          securityQuestionId: q.id,
+          securityAnswerHash,
+        },
+        username,
+        fullName,
+        null,
+        key
+      );
+      p.username = username;
+      p.nickname = username;
+      p.nicknameChosen = false;
       p.passwordHash = await auth.hashPassword(String(payload.password));
+      p.securityQuestionId = q.id;
+      p.securityAnswerHash = securityAnswerHash;
       p.authSessions = [];
       const sess = auth.issueSession(p);
       await enterGame(socket, p, key, { isNew: true, sessionToken: sess.token });
@@ -1554,21 +1671,148 @@ io.on('connection', (socket) => {
     }
   });
 
+  socket.on('setNickname', async (payload) => {
+    try {
+      const p = online.get(socket.id);
+      if (!p) return;
+      ensureAccountFields(p);
+      const nick = String((payload && payload.nickname) || '').trim().slice(0, 16).replace(/[<>]/g, '');
+      const nerr = auth.validateNickname(nick);
+      if (nerr) { socket.emit('errorMsg', nerr); return; }
+      const key = accountKey(p);
+      if (isNicknameTaken(nick, key) && nick.toLowerCase() !== String(p.nickname || '').toLowerCase()) {
+        socket.emit('errorMsg', 'Biệt danh đã có người dùng.');
+        return;
+      }
+      p.nickname = nick;
+      p.nicknameChosen = true;
+      playersByNick[key] = stripTransient(p);
+      void saveData();
+      emitSelf(socket, p);
+      socket.emit('nicknameSet', { nickname: nick });
+      broadcastState();
+      pushChat({ type: 'system', text: `${nick} (${p.prisonerNo}) đã đặt biệt danh trong trại.`, ts: Date.now() });
+    } catch (e) {
+      console.error('[setNickname]', e && e.message);
+      socket.emit('errorMsg', 'Không đặt được biệt danh.');
+    }
+  });
+
+  socket.on('setSecurity', async (payload) => {
+    try {
+      const p = online.get(socket.id);
+      if (!p) return;
+      ensureAccountFields(p);
+      const q = auth.questionById(payload && payload.securityQuestionId);
+      if (!q) { socket.emit('errorMsg', 'Chọn câu hỏi bảo mật.'); return; }
+      let hash;
+      try {
+        hash = await auth.hashSecurityAnswer(payload.securityAnswer);
+      } catch {
+        socket.emit('errorMsg', 'Câu trả lời bảo mật phải từ 2 ký tự.');
+        return;
+      }
+      p.securityQuestionId = q.id;
+      p.securityAnswerHash = hash;
+      const key = accountKey(p);
+      playersByNick[key] = stripTransient(p);
+      void saveData();
+      emitSelf(socket, p);
+      socket.emit('securitySet', { ok: true });
+      socket.emit('actionResult', { kind: 'security', message: 'Đã lưu câu hỏi bảo mật.' });
+    } catch (e) {
+      console.error('[setSecurity]', e && e.message);
+      socket.emit('errorMsg', 'Không lưu được câu hỏi bảo mật.');
+    }
+  });
+
+  socket.on('forgotLookup', async (payload) => {
+    try {
+      payload = payload || {};
+      let username = String(payload.username || payload.nickname || '').trim().slice(0, 16).replace(/[<>]/g, '');
+      const key = username.toLowerCase();
+      const ip = clientIp(socket);
+      const rate = auth.checkForgotRate(key || ip, ip);
+      if (!rate.ok) {
+        socket.emit('errorMsg', `Thử lại sau ${Math.ceil(rate.retryAfterMs / 1000)}s.`);
+        return;
+      }
+      const saved = ensureAccountFields(playersByNick[key]);
+      if (!saved || !saved.passwordHash) {
+        auth.recordForgotFail(key || ip, ip);
+        socket.emit('errorMsg', 'Không tìm thấy tài khoản có mật khẩu.');
+        return;
+      }
+      if (!saved.securityQuestionId || !saved.securityAnswerHash) {
+        socket.emit('errorMsg', 'Tài khoản chưa đặt câu hỏi bảo mật. Đăng nhập rồi thiết lập trong game.');
+        return;
+      }
+      const q = auth.questionById(saved.securityQuestionId);
+      auth.clearForgotFails(key, ip);
+      socket.emit('forgotChallenge', {
+        username: saved.username || username,
+        questionId: q.id,
+        question: q.text,
+      });
+    } catch (e) {
+      console.error('[forgotLookup]', e && e.message);
+      socket.emit('errorMsg', 'Không tra cứu được.');
+    }
+  });
+
+  socket.on('forgotReset', async (payload) => {
+    try {
+      payload = payload || {};
+      let username = String(payload.username || payload.nickname || '').trim().slice(0, 16).replace(/[<>]/g, '');
+      const key = username.toLowerCase();
+      const ip = clientIp(socket);
+      const rate = auth.checkForgotRate(key, ip);
+      if (!rate.ok) {
+        socket.emit('errorMsg', `Thử lại sau ${Math.ceil(rate.retryAfterMs / 1000)}s.`);
+        return;
+      }
+      const saved = ensureAccountFields(playersByNick[key]);
+      if (!saved || !saved.securityAnswerHash) {
+        auth.recordForgotFail(key, ip);
+        socket.emit('errorMsg', 'Không đặt lại được mật khẩu.');
+        return;
+      }
+      const okAns = await auth.verifySecurityAnswer(payload.securityAnswer || payload.answer, saved.securityAnswerHash);
+      if (!okAns) {
+        auth.recordForgotFail(key, ip);
+        socket.emit('errorMsg', 'Câu trả lời bảo mật không đúng.');
+        return;
+      }
+      const err = auth.validatePasswordStrength(payload.newPassword || payload.password);
+      if (err) { socket.emit('errorMsg', err); return; }
+      saved.passwordHash = await auth.hashPassword(String(payload.newPassword || payload.password));
+      auth.revokeAllSessions(saved);
+      playersByNick[key] = saved;
+      void saveData();
+      auth.clearForgotFails(key, ip);
+      socket.emit('forgotDone', { username: saved.username || username, message: 'Đã đặt mật khẩu mới. Hãy đăng nhập.' });
+    } catch (e) {
+      console.error('[forgotReset]', e && e.message);
+      socket.emit('errorMsg', 'Không đặt lại được mật khẩu.');
+    }
+  });
+
   // Legacy join → point clients at register/login tabs
   socket.on('join', (payload) => {
     payload = payload || {};
-    const key = String(payload.nickname || '').trim().toLowerCase();
+    const key = String(payload.username || payload.nickname || '').trim().toLowerCase();
     if (payload.sessionToken || payload.password) {
-      // Old clients: treat as login attempt via dedicated event semantics
       socket.emit('errorMsg', 'Phiên bản mới: hãy tải lại trang rồi Đăng nhập.');
       return;
     }
     if (key && playersByNick[key]) {
       socket.emit('errorMsg', 'Tài khoản đã có — dùng tab Đăng nhập.');
       if (!playersByNick[key].passwordHash) {
+        const s = ensureAccountFields(playersByNick[key]);
         socket.emit('needClaim', {
-          nickname: playersByNick[key].nickname || payload.nickname,
-          fullName: playersByNick[key].fullName || payload.nickname,
+          username: s.username,
+          nickname: s.nickname,
+          fullName: s.fullName || s.nickname,
           message: 'Tài khoản cũ chưa có mật khẩu. Đặt mật khẩu để tiếp tục.',
         });
       }
@@ -1577,7 +1821,7 @@ io.on('connection', (socket) => {
     socket.emit('errorMsg', 'Vui lòng dùng «Tạo nhân vật mới» và đặt mật khẩu.');
   });
 
-  function doRoomMove(roomId) {
+    function doRoomMove(roomId) {
     const p = online.get(socket.id);
     if (!p) return;
     if (p.role !== 'guard' && (p.escaped || p.released)) return;
@@ -1972,7 +2216,7 @@ io.on('connection', (socket) => {
       p.bribeGuardId = null; p.bribeUntil = 0;
       delete p.achievementsUnlocked.good_behavior;
       promoteToGuard(p, socket);
-      playersByNick[p.nickname.toLowerCase()] = stripTransient(p);
+      ensureAccountFields(p); playersByNick[accountKey(p)] = stripTransient(p);
       saveData();
     } else {
       failEscapeCatch(p, socket, bribed ? 'Cán bộ đổi ý kịp lúc — điểm bị xóa, án tính lại!' : 'Bị bắt khi leo tường — mất hết điểm, ở tù lại từ đầu!');
@@ -2584,7 +2828,7 @@ io.on('connection', (socket) => {
   socket.on('disconnect', () => {
     const p = online.get(socket.id);
     if (p) {
-      playersByNick[p.nickname.toLowerCase()] = stripTransient(p);
+      ensureAccountFields(p); playersByNick[accountKey(p)] = stripTransient(p);
       online.delete(socket.id);
       pushChat({ type: 'system', text: `${p.nickname} đã rời trại.`, ts: Date.now() });
       saveData();

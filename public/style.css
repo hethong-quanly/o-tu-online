@@ -538,3 +538,11 @@ body.mobile-chrome #joystick { z-index: 31; }
 .rhythm-note.miss { background: #e74c3c; opacity: .5; }
 #rhythm-tap { width: 100%; min-height: 64px; font-size: 22px; letter-spacing: .04em; }
 #mob-cheer { background: #2a6a3a; }
+
+.linkish {
+  display: inline-block; margin-top: 10px; background: none; border: none;
+  color: #8ec8ff; font-size: 13px; cursor: pointer; text-decoration: underline;
+  padding: 0; width: auto;
+}
+.linkish:hover { color: #c6e2ff; }
+#auth-forgot .meta { margin: 6px 0 10px; line-height: 1.35; }

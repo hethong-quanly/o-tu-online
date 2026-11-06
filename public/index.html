@@ -50,24 +50,44 @@
     <div class="panel-card join-card login-card">
       <div class="lotus-ish" aria-hidden="true">⛓️</div>
       <h1 id="join-h">Ở tù online</h1>
-      <p class="sub">Trại 3D v11 · Biểu diễn · Đăng nhập · Chibi · Đồng phục</p>
+      <p class="sub">Chào mừng bạn đến Nhà tù vui vẻ</p>
       <div class="auth-tabs" role="tablist">
         <button type="button" class="auth-tab on" data-auth="login" id="tab-login">Đăng nhập</button>
         <button type="button" class="auth-tab" data-auth="register" id="tab-register">Tạo nhân vật mới</button>
       </div>
 
       <div id="auth-login" class="auth-pane">
-        <label class="lbl" for="login-nick">Biệt danh</label>
-        <input id="login-nick" maxlength="16" autocomplete="username" placeholder="VD: Tí Sắt" />
+        <label class="lbl" for="login-nick">Tên đăng nhập</label>
+        <input id="login-nick" maxlength="16" autocomplete="username" placeholder="VD: tisat01" />
         <label class="lbl" for="login-pass">Mật khẩu</label>
         <input id="login-pass" type="password" maxlength="72" autocomplete="current-password" placeholder="••••••••" />
         <button id="btn-login" class="btn pri big" type="button">Đăng nhập</button>
-        <p class="meta" style="margin-top:8px;font-size:12px;opacity:.85">Thiết bị đã lưu phiên sẽ tự vào trại.</p>
+        <button type="button" class="linkish" id="btn-forgot-open">Quên mật khẩu?</button>
+      </div>
+
+      <div id="auth-forgot" class="auth-pane" hidden>
+        <p class="ghi" id="forgot-step-hint">Nhập tên đăng nhập để lấy câu hỏi bảo mật.</p>
+        <div id="forgot-step1">
+          <label class="lbl" for="forgot-user">Tên đăng nhập</label>
+          <input id="forgot-user" maxlength="16" autocomplete="username" placeholder="VD: tisat01" />
+          <button id="btn-forgot-lookup" class="btn pri big" type="button">Tiếp tục</button>
+        </div>
+        <div id="forgot-step2" hidden>
+          <p class="meta" id="forgot-question">—</p>
+          <label class="lbl" for="forgot-answer">Câu trả lời</label>
+          <input id="forgot-answer" maxlength="64" autocomplete="off" placeholder="Không phân biệt hoa thường / dấu" />
+          <label class="lbl" for="forgot-pass">Mật khẩu mới</label>
+          <input id="forgot-pass" type="password" maxlength="72" autocomplete="new-password" placeholder="Ít nhất 6 ký tự" />
+          <label class="lbl" for="forgot-pass2">Nhập lại mật khẩu mới</label>
+          <input id="forgot-pass2" type="password" maxlength="72" autocomplete="new-password" />
+          <button id="btn-forgot-reset" class="btn pri big" type="button">Đặt lại mật khẩu</button>
+        </div>
+        <button type="button" class="linkish" id="btn-forgot-back">← Quay lại đăng nhập</button>
       </div>
 
       <div id="auth-claim" class="auth-pane" hidden>
         <p class="ghi" id="claim-msg">Tài khoản cũ chưa có mật khẩu. Đặt mật khẩu để bảo vệ tiến trình.</p>
-        <label class="lbl" for="claim-nick">Biệt danh</label>
+        <label class="lbl" for="claim-nick">Tên đăng nhập</label>
         <input id="claim-nick" maxlength="16" readonly />
         <label class="lbl" for="claim-pass">Mật khẩu mới</label>
         <input id="claim-pass" type="password" maxlength="72" autocomplete="new-password" placeholder="Ít nhất 6 ký tự" />
@@ -79,9 +99,9 @@
       <div id="auth-register" class="auth-pane" hidden>
       <label class="lbl" for="fullName">Họ và tên</label>
       <input id="fullName" maxlength="40" autocomplete="name" placeholder="VD: Nguyễn Văn Sọc" />
-      <label class="lbl" for="nick">Biệt danh trong trại</label>
+      <label class="lbl" for="nick">Tên đăng nhập</label>
       <div class="ten">
-        <input id="nick" maxlength="16" autocomplete="nickname" placeholder="VD: Tí Sắt" />
+        <input id="nick" maxlength="16" autocomplete="username" placeholder="VD: tisat01" />
         <span class="dem" id="nick-dem">0/16</span>
       </div>
       <label class="lbl" for="crime">Tội danh (hài hước)</label>
@@ -129,11 +149,15 @@
           <div class="pcard-row"><span>Xếp loại</span><b id="pv-rate">Kém</b></div>
         </div>
       </div>
+      <label class="lbl" for="reg-sec-q">Câu hỏi bảo mật</label>
+      <select id="reg-sec-q"></select>
+      <label class="lbl" for="reg-sec-a">Câu trả lời bảo mật</label>
+      <input id="reg-sec-a" maxlength="64" autocomplete="off" placeholder="Dùng khi quên mật khẩu" />
       <label class="lbl" for="reg-pass">Mật khẩu</label>
       <input id="reg-pass" type="password" maxlength="72" autocomplete="new-password" placeholder="Ít nhất 6 ký tự" />
       <label class="lbl" for="reg-pass2">Nhập lại mật khẩu</label>
       <input id="reg-pass2" type="password" maxlength="72" autocomplete="new-password" />
-      <p class="ghi">Làm thành tích để được đánh giá tốt &amp; giảm án. Tối đa 10.000 tù nhân.</p>
+      <p class="ghi">Sau khi vào trại bạn sẽ đặt <b>biệt danh</b> hiện trên đầu. Tối đa 10.000 tù nhân.</p>
       <button id="btn-join" class="btn pri big" type="button">Tạo nhân vật &amp; nhập trại</button>
       </div>
       <p id="join-error" class="error" role="alert"></p>
@@ -251,6 +275,34 @@
       <div class="meta" id="rhythm-score">0 / 0</div>
     </div>
   </div>
+
+  <div id="nickname-modal" class="overlay-panel" hidden>
+    <div class="panel-card join-card" style="max-width:420px">
+      <h2>Đặt biệt danh</h2>
+      <p class="meta">Biệt danh hiện trên đầu nhân vật trong trại (khác tên đăng nhập).</p>
+      <label class="lbl" for="ingame-nick">Biệt danh</label>
+      <div class="ten">
+        <input id="ingame-nick" maxlength="16" autocomplete="nickname" placeholder="VD: Tí Sắt" />
+        <span class="dem" id="ingame-nick-dem">0/16</span>
+      </div>
+      <p id="nickname-error" class="error" role="alert"></p>
+      <button id="btn-set-nickname" class="btn pri big" type="button">Xác nhận biệt danh</button>
+    </div>
+  </div>
+
+  <div id="security-modal" class="overlay-panel" hidden>
+    <div class="panel-card join-card" style="max-width:420px">
+      <h2>Câu hỏi bảo mật</h2>
+      <p class="meta">Tài khoản của bạn chưa có câu hỏi bảo mật — cần để khôi phục mật khẩu.</p>
+      <label class="lbl" for="sec-q">Câu hỏi</label>
+      <select id="sec-q"></select>
+      <label class="lbl" for="sec-a">Câu trả lời</label>
+      <input id="sec-a" maxlength="64" autocomplete="off" placeholder="Không phân biệt hoa thường / dấu" />
+      <p id="security-error" class="error" role="alert"></p>
+      <button id="btn-set-security" class="btn pri big" type="button">Lưu câu hỏi bảo mật</button>
+    </div>
+  </div>
+
   <div id="help-modal" class="overlay-panel" hidden>
     <div class="panel-card help-card">
       <h2>Hướng dẫn</h2>
@@ -325,7 +377,7 @@
   <script>
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {
-        navigator.serviceWorker.register('/sw.js?v=3d-v10', { updateViaCache: 'none' })
+        navigator.serviceWorker.register('/sw.js?v=3d-v12', { updateViaCache: 'none' })
           .then((reg) => { try { reg.update(); } catch (_) {} })
           .catch(() => {});
       });

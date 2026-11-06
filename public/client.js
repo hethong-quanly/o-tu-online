@@ -18,7 +18,7 @@
   let nightMode = false;
 
   const LS_KEY = 'otu_guest_v3';
-  const SESSION_KEY = 'otu_session_v11';
+  const SESSION_KEY = 'otu_session_v12';
   const socket = io({ transports: ['websocket', 'polling'] });
   let authTab = 'login';
   let pendingShow = null;
@@ -33,11 +33,40 @@
   function loadSession() {
     try { return JSON.parse(localStorage.getItem(SESSION_KEY) || 'null'); } catch { return null; }
   }
-  function saveSession(nickname, token) {
+  function saveSession(username, token) {
     try {
-      if (!nickname || !token) localStorage.removeItem(SESSION_KEY);
-      else localStorage.setItem(SESSION_KEY, JSON.stringify({ nickname, token }));
+      if (!username || !token) localStorage.removeItem(SESSION_KEY);
+      else localStorage.setItem(SESSION_KEY, JSON.stringify({ username, nickname: username, token }));
     } catch {}
+  }
+  function sessionUsername(sess) {
+    return (sess && (sess.username || sess.nickname)) || '';
+  }
+  function fillSecuritySelects() {
+    const qs = config.securityQuestions || [];
+    const opts = qs.map((q) => `<option value="${escapeHtml(q.id)}">${escapeHtml(q.text)}</option>`).join('');
+    ['#reg-sec-q', '#sec-q'].forEach((sel) => {
+      const el = $(sel);
+      if (el) el.innerHTML = opts || '<option value="">—</option>';
+    });
+  }
+  function maybePromptSetup() {
+    if (!me) return;
+    const nickModal = $('#nickname-modal');
+    const secModal = $('#security-modal');
+    if (me.needsNickname && nickModal && nickModal.hidden) {
+      if (secModal) secModal.hidden = true;
+      nickModal.hidden = false;
+      if ($('#ingame-nick') && !$('#ingame-nick').value) {
+        $('#ingame-nick').value = '';
+        $('#ingame-nick-dem').textContent = '0/16';
+      }
+      return;
+    }
+    if (!me.needsNickname && me.needsSecurity && secModal && secModal.hidden) {
+      fillSecuritySelects();
+      secModal.hidden = false;
+    }
   }
   function clearSession() { try { localStorage.removeItem(SESSION_KEY); } catch {} }
   function escapeHtml(s) {
@@ -191,60 +220,128 @@
     const login = $('#auth-login');
     const reg = $('#auth-register');
     const claim = $('#auth-claim');
+    const forgot = $('#auth-forgot');
     if (login) login.hidden = tab !== 'login';
     if (reg) reg.hidden = tab !== 'register';
     if (claim) claim.hidden = tab !== 'claim';
+    if (forgot) forgot.hidden = tab !== 'forgot';
     $('#join-error').textContent = '';
+    if (tab === 'forgot') {
+      const s1 = $('#forgot-step1'); const s2 = $('#forgot-step2');
+      if (s1) s1.hidden = false; if (s2) s2.hidden = true;
+      if ($('#forgot-step-hint')) $('#forgot-step-hint').textContent = 'Nhập tên đăng nhập để lấy câu hỏi bảo mật.';
+    }
   }
   $$('.auth-tab').forEach((b) => b.onclick = () => setAuthTab(b.dataset.auth));
 
   function tryAutoLogin() {
     const sess = loadSession();
-    if (!sess || !sess.nickname || !sess.token) return;
-    if ($('#login-nick')) $('#login-nick').value = sess.nickname;
-    socket.emit('login', { nickname: sess.nickname, sessionToken: sess.token });
+    const user = sessionUsername(sess);
+    if (!user || !sess.token) return;
+    if ($('#login-nick')) $('#login-nick').value = user;
+    socket.emit('login', { username: user, sessionToken: sess.token });
   }
 
   $('#btn-login').onclick = () => {
     $('#join-error').textContent = '';
-    const nickname = ($('#login-nick').value || '').trim();
+    const username = ($('#login-nick').value || '').trim();
     const password = $('#login-pass').value || '';
-    if (nickname.length < 2) { $('#join-error').textContent = 'Nhập biệt danh.'; return; }
+    if (username.length < 2) { $('#join-error').textContent = 'Nhập tên đăng nhập.'; return; }
     if (!password) { $('#join-error').textContent = 'Nhập mật khẩu.'; return; }
-    saveGuest({ ...(loadGuest() || {}), nickname });
-    socket.emit('login', { nickname, password });
+    saveGuest({ ...(loadGuest() || {}), username, nickname: username });
+    socket.emit('login', { username, password });
   };
   $('#login-pass').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('#btn-login').click(); });
 
+  const btnForgotOpen = $('#btn-forgot-open');
+  if (btnForgotOpen) btnForgotOpen.onclick = () => {
+    setAuthTab('forgot');
+    if ($('#forgot-user') && $('#login-nick')) $('#forgot-user').value = $('#login-nick').value.trim();
+  };
+  const btnForgotBack = $('#btn-forgot-back');
+  if (btnForgotBack) btnForgotBack.onclick = () => setAuthTab('login');
+  const btnForgotLookup = $('#btn-forgot-lookup');
+  if (btnForgotLookup) btnForgotLookup.onclick = () => {
+    $('#join-error').textContent = '';
+    const username = ($('#forgot-user').value || '').trim();
+    if (username.length < 2) { $('#join-error').textContent = 'Nhập tên đăng nhập.'; return; }
+    socket.emit('forgotLookup', { username });
+  };
+  const btnForgotReset = $('#btn-forgot-reset');
+  if (btnForgotReset) btnForgotReset.onclick = () => {
+    $('#join-error').textContent = '';
+    const username = ($('#forgot-user').value || '').trim();
+    const securityAnswer = ($('#forgot-answer').value || '').trim();
+    const newPassword = ($('#forgot-pass').value || '');
+    const newPassword2 = ($('#forgot-pass2').value || '');
+    if (!securityAnswer) { $('#join-error').textContent = 'Nhập câu trả lời bảo mật.'; return; }
+    if (newPassword !== newPassword2) { $('#join-error').textContent = 'Mật khẩu nhập lại không khớp.'; return; }
+    if (newPassword.length < 6) { $('#join-error').textContent = 'Mật khẩu phải từ 6 ký tự.'; return; }
+    socket.emit('forgotReset', { username, securityAnswer, newPassword });
+  };
+
   $('#btn-claim').onclick = () => {
     $('#join-error').textContent = '';
-    const nickname = ($('#claim-nick').value || '').trim();
+    const username = ($('#claim-nick').value || '').trim();
     const password = $('#claim-pass').value || '';
     const password2 = $('#claim-pass2').value || '';
     if (password !== password2) { $('#join-error').textContent = 'Mật khẩu nhập lại không khớp.'; return; }
     if (password.length < 6) { $('#join-error').textContent = 'Mật khẩu phải từ 6 ký tự.'; return; }
-    socket.emit('claimPassword', { nickname, password });
+    socket.emit('claimPassword', { username, nickname: username, password });
   };
 
   $('#btn-join').onclick = () => {
     $('#join-error').textContent = '';
-    const nickname = $('#nick').value.trim();
+    const username = $('#nick').value.trim();
     const fullName = $('#fullName').value.trim();
     const crimeId = $('#crime').value;
     const crimeCustom = $('#crimeCustom').value.trim();
     const sentenceId = $('#sentence').value;
     const password = ($('#reg-pass') && $('#reg-pass').value) || '';
     const password2 = ($('#reg-pass2') && $('#reg-pass2').value) || '';
+    const securityQuestionId = ($('#reg-sec-q') && $('#reg-sec-q').value) || '';
+    const securityAnswer = ($('#reg-sec-a') && $('#reg-sec-a').value) || '';
     if (password !== password2) { $('#join-error').textContent = 'Mật khẩu nhập lại không khớp.'; return; }
     if (password.length < 6) { $('#join-error').textContent = 'Mật khẩu phải từ 6 ký tự.'; return; }
+    if (!securityQuestionId) { $('#join-error').textContent = 'Chọn câu hỏi bảo mật.'; return; }
+    if (securityAnswer.trim().length < 2) { $('#join-error').textContent = 'Nhập câu trả lời bảo mật.'; return; }
     saveGuest({
-      nickname, fullName, crimeId, crimeCustom, sentenceId, appearance,
+      username, nickname: username, fullName, crimeId, crimeCustom, sentenceId, appearance,
       guestId: (saved && saved.guestId) || Math.random().toString(36).slice(2),
       prisonerNo: saved && saved.prisonerNo,
     });
-    socket.emit('register', { nickname, fullName, crimeId, crimeCustom, sentenceId, appearance, password });
+    socket.emit('register', {
+      username, nickname: username, fullName, crimeId, crimeCustom, sentenceId, appearance,
+      password, securityQuestionId, securityAnswer,
+    });
   };
   $('#nick').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('#btn-join').click(); });
+
+  const ingameNick = $('#ingame-nick');
+  if (ingameNick) {
+    ingameNick.oninput = () => {
+      const dem = $('#ingame-nick-dem');
+      if (dem) dem.textContent = `${ingameNick.value.length}/16`;
+    };
+  }
+  const btnSetNick = $('#btn-set-nickname');
+  if (btnSetNick) btnSetNick.onclick = () => {
+    const nickname = (ingameNick && ingameNick.value || '').trim();
+    const err = $('#nickname-error');
+    if (err) err.textContent = '';
+    if (nickname.length < 2) { if (err) err.textContent = 'Biệt danh phải từ 2 ký tự.'; return; }
+    socket.emit('setNickname', { nickname });
+  };
+  const btnSetSec = $('#btn-set-security');
+  if (btnSetSec) btnSetSec.onclick = () => {
+    const securityQuestionId = ($('#sec-q') && $('#sec-q').value) || '';
+    const securityAnswer = ($('#sec-a') && $('#sec-a').value) || '';
+    const err = $('#security-error');
+    if (err) err.textContent = '';
+    if (!securityQuestionId) { if (err) err.textContent = 'Chọn câu hỏi.'; return; }
+    if (securityAnswer.trim().length < 2) { if (err) err.textContent = 'Nhập câu trả lời.'; return; }
+    socket.emit('setSecurity', { securityQuestionId, securityAnswer });
+  };
 
   function syncAudioUnlockBanner() {
     const btn = $('#audio-unlock');
@@ -1305,51 +1402,87 @@
         $('#crimeCustom').hidden = false;
         if (saved.crimeCustom) $('#crimeCustom').value = saved.crimeCustom;
       }
-      if (saved.nickname) {
-        if ($('#login-nick')) $('#login-nick').value = saved.nickname;
-        if ($('#nick')) $('#nick').value = saved.nickname;
+      if (saved.username || saved.nickname) {
+        const u = saved.username || saved.nickname;
+        if ($('#login-nick')) $('#login-nick').value = u;
+        if ($('#nick')) $('#nick').value = u;
       }
       updatePreviewCard();
     }
+    fillSecuritySelects();
     const sess = loadSession();
-    if (sess && sess.nickname && $('#login-nick')) $('#login-nick').value = sess.nickname;
+    const su = sessionUsername(sess);
+    if (su && $('#login-nick')) $('#login-nick').value = su;
     setAuthTab('login');
     tryAutoLogin();
   });
 
   socket.on('needClaim', (info) => {
     setAuthTab('claim');
-    if ($('#claim-nick')) $('#claim-nick').value = (info && info.nickname) || '';
+    if ($('#claim-nick')) $('#claim-nick').value = (info && (info.username || info.nickname)) || '';
     if ($('#claim-msg') && info && info.message) $('#claim-msg').textContent = info.message;
     $('#join-error').textContent = '';
     toast((info && info.message) || 'Cần đặt mật khẩu');
   });
   socket.on('sessionInvalid', () => { clearSession(); });
 
+  socket.on('forgotChallenge', (info) => {
+    setAuthTab('forgot');
+    if ($('#forgot-step1')) $('#forgot-step1').hidden = true;
+    if ($('#forgot-step2')) $('#forgot-step2').hidden = false;
+    if ($('#forgot-question')) $('#forgot-question').textContent = (info && info.question) || '—';
+    if ($('#forgot-step-hint')) $('#forgot-step-hint').textContent = 'Trả lời câu hỏi rồi đặt mật khẩu mới.';
+    if (info && info.username && $('#forgot-user')) $('#forgot-user').value = info.username;
+    $('#join-error').textContent = '';
+  });
+  socket.on('forgotDone', (info) => {
+    toast((info && info.message) || 'Đã đặt mật khẩu mới');
+    clearSession();
+    setAuthTab('login');
+    if (info && info.username && $('#login-nick')) $('#login-nick').value = info.username;
+    if ($('#login-pass')) $('#login-pass').value = '';
+    $('#join-error').textContent = '';
+  });
+  socket.on('nicknameSet', (info) => {
+    if ($('#nickname-modal')) $('#nickname-modal').hidden = true;
+    toast(`Biệt danh: ${(info && info.nickname) || ''}`);
+    if (me) { me.nickname = info.nickname; me.needsNickname = false; me.nicknameChosen = true; }
+    maybePromptSetup();
+  });
+  socket.on('securitySet', () => {
+    if ($('#security-modal')) $('#security-modal').hidden = true;
+    if (me) me.needsSecurity = false;
+    toast('Đã lưu câu hỏi bảo mật');
+  });
+
   socket.on('joined', (info) => {
     $('#join-screen').hidden = true;
     showGameUI(true);
     const g = loadGuest() || {};
     g.prisonerNo = info.prisonerNo || g.prisonerNo;
+    g.username = info.username || g.username;
     g.nickname = info.nickname || g.nickname;
     saveGuest(g);
-    if (info && info.sessionToken) saveSession(info.nickname, info.sessionToken);
+    if (info && info.sessionToken) saveSession(info.username || info.nickname, info.sessionToken);
     initWorld();
     const wb = $('#welcome-banner');
     wb.hidden = false;
-    wb.textContent = `Chào ${info.nickname}! Số hiệu ${info.prisonerNo || ''} — cải tạo tốt sẽ được giảm án!`;
+    const greet = info.nicknameChosen ? info.nickname : (info.username || info.nickname);
+    wb.textContent = `Chào ${greet}! Số hiệu ${info.prisonerNo || ''} — cải tạo tốt sẽ được giảm án!`;
     setTimeout(() => { wb.hidden = true; }, 5000);
-    toast(`Chào mừng ${info.nickname}`);
+    toast(`Chào mừng ${greet}`);
     syncAudioUnlockBanner();
-    if (!localStorage.getItem('otu_help_seen')) {
+    if (!localStorage.getItem('otu_help_seen') && info.nicknameChosen) {
       $('#help-modal').hidden = false;
       localStorage.setItem('otu_help_seen', '1');
     }
+    // prompts after me arrives
   });
 
   socket.on('me', (p) => {
     me = p;
     updateHud();
+    maybePromptSetup();
     if (!world3d) {
       pendingMe = p;
     } else if (!world3d.fallback) {
