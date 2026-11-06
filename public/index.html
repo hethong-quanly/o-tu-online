@@ -29,6 +29,10 @@
     <button type="button" class="mob-btn" id="mob-sit" title="Ngồi">🪑</button>
     <button type="button" class="mob-btn" id="mob-perform" title="Biểu diễn">🎭</button>
     <button type="button" class="mob-btn" id="mob-cheer" title="Cổ vũ" hidden>👏</button>
+    <button type="button" class="mob-btn" id="mob-provoke" title="Kiếm chuyện">😤</button>
+    <button type="button" class="mob-btn" id="mob-fight" title="Đánh lộn">🥊</button>
+    <button type="button" class="mob-btn" id="mob-bet" title="Cá độ">🎲</button>
+    <button type="button" class="mob-btn" id="mob-gift" title="Tặng quà">🎁</button>
   </div>
 
   <!-- Compact always-on HUD (mobile) + chrome toggle FABs -->
@@ -230,6 +234,10 @@
     <button type="button" id="dock-map"><span>🗺️</span><small>Bản đồ</small></button>
     <button type="button" data-act="pushup"><span>🏋️</span><small>Hít đất</small></button>
     <button type="button" id="dock-perform"><span>🎭</span><small>Biểu diễn</small></button>
+    <button type="button" id="dock-provoke"><span>😤</span><small>Kiếm chuyện</small></button>
+    <button type="button" id="dock-fight"><span>🥊</span><small>Đánh lộn</small></button>
+    <button type="button" id="dock-bet"><span>🎲</span><small>Cá độ</small></button>
+    <button type="button" id="dock-gift"><span>🎁</span><small>Tặng quà</small></button>
     <button type="button" data-act="letter"><span>✉️</span><small>Viết thư</small></button>
     <button type="button" data-act="mark_day"><span>✏️</span><small>Gạch</small></button>
     <button type="button" id="dock-chat"><span>💬</span><small>Chat</small></button>
@@ -303,12 +311,60 @@
     </div>
   </div>
 
+
+  <div id="trial-modal" class="overlay-panel" hidden>
+    <div class="panel-card join-card" style="max-width:480px;max-height:88vh;overflow:auto">
+      <h2 id="trial-title">⚖️ Tòa án</h2>
+      <p class="meta" id="trial-hint">Trả lời 5 câu hỏi.</p>
+      <div id="trial-questions"></div>
+      <p id="trial-error" class="error" role="alert"></p>
+      <button id="btn-trial-submit" class="btn pri big" type="button">Nộp bài cho Tòa</button>
+    </div>
+  </div>
+
+  <div id="verdict-modal" class="overlay-panel" hidden>
+    <div class="panel-card join-card" style="max-width:420px">
+      <h2 id="verdict-title">—</h2>
+      <p id="verdict-body" class="meta"></p>
+      <button id="btn-verdict-ok" class="btn pri big" type="button">Tiếp tục</button>
+    </div>
+  </div>
+
+  <div id="release-modal" class="overlay-panel" hidden>
+    <div class="panel-card join-card" style="max-width:440px">
+      <h2>🕊️ Thả tự do</h2>
+      <p class="meta" id="release-body">Án đã hết. Nhận tiền trợ cấp.</p>
+      <div id="release-options" class="perform-kinds"></div>
+    </div>
+  </div>
+
+  <div id="target-pick" class="overlay-panel" hidden>
+    <div class="panel-card" style="max-width:400px">
+      <h2 id="target-pick-title">Chọn người chơi</h2>
+      <div id="target-pick-list" class="perform-kinds"></div>
+      <div id="target-bet-amount" hidden>
+        <label class="lbl" for="bet-amount">Số xu cược</label>
+        <input id="bet-amount" type="number" min="10" max="500" value="50" />
+      </div>
+      <button type="button" class="btn" id="target-pick-x">Đóng</button>
+    </div>
+  </div>
+
+  <div id="bet-offer-modal" class="overlay-panel" hidden>
+    <div class="panel-card" style="max-width:400px">
+      <h2>🎲 Lời mời cá độ</h2>
+      <p class="meta" id="bet-offer-text">—</p>
+      <button class="btn pri big" id="btn-bet-accept" type="button">Đồng ý</button>
+      <button class="btn" id="btn-bet-decline" type="button">Từ chối</button>
+    </div>
+  </div>
+
   <div id="help-modal" class="overlay-panel" hidden>
     <div class="panel-card help-card">
       <h2>Hướng dẫn</h2>
       <ul class="help-list">
         <li><b>Bản đồ:</b> phím <b>M</b> / nút 🗺️ — minimap góc phải, bản đồ đầy đủ có nhãn khu.</li>
-        <li><b>Khu tạm giam:</b> tù mới không ra ngoài; nói chuyện / chat tích lũy 5 phút với cán bộ rồi vào Khu phân trại.</li>
+        <li><b>Khu tạm giam:</b> 120 giây. Thể dục / Nói chuyện / Tặng quà mỗi loại −30s (một lần). Hết giờ → Tòa án 5 câu hỏi.</li>
         <li><b>Lao động:</b> thu hoạch rau, may quần áo, đóng tủ/bàn/ghế tại khu lao động (đúng giờ lao động).</li>
         <li><b>Phòng hạnh phúc:</b> mở khi hoàn thành 100% nhiệm vụ — gặp mặt gia đình (lành mạnh), nhận buff.</li>
         <li><b>Di chuyển:</b> WASD / phím mũi tên, chạm sàn, hoặc joystick trên điện thoại. Shift = chạy.</li>
@@ -377,7 +433,7 @@
   <script>
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {
-        navigator.serviceWorker.register('/sw.js?v=3d-v12', { updateViaCache: 'none' })
+        navigator.serviceWorker.register('/sw.js?v=3d-v13', { updateViaCache: 'none' })
           .then((reg) => { try { reg.update(); } catch (_) {} })
           .catch(() => {});
       });

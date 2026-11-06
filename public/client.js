@@ -69,6 +69,115 @@
     }
   }
   function clearSession() { try { localStorage.removeItem(SESSION_KEY); } catch {} }
+
+  let pendingTargetMode = null; // provoke|fight|bet|gift
+  let pendingBetId = null;
+
+  function nearbyPlayers(maxDist) {
+    maxDist = maxDist || 12;
+    if (!me) return [];
+    return (world.players || []).filter((p) => {
+      if (!me || p.id === me.id) return false;
+      if (p.role === 'guard') return false;
+      const dx = (p.x || 0) - (me.x || 0);
+      const dz = (p.z || 0) - (me.z || 0);
+      return dx * dx + dz * dz <= maxDist * maxDist;
+    });
+  }
+
+  function openTargetPick(mode) {
+    pendingTargetMode = mode;
+    const modal = $('#target-pick');
+    const list = $('#target-pick-list');
+    const title = $('#target-pick-title');
+    const betBox = $('#target-bet-amount');
+    if (!modal || !list) return;
+    const players = nearbyPlayers(mode === 'gift' || mode === 'bet' ? 14 : 11);
+    title.textContent = ({
+      provoke: 'Kiếm chuyện với…',
+      fight: 'Đánh lộn với…',
+      bet: 'Cá độ với…',
+      gift: 'Tặng quà cho…',
+    })[mode] || 'Chọn người';
+    if (betBox) betBox.hidden = mode !== 'bet';
+    if (!players.length) {
+      list.innerHTML = '<p class="meta">Không có ai đủ gần. Hãy lại gần phạm nhân khác.</p>';
+    } else {
+      list.innerHTML = players.map((p) =>
+        `<button type="button" class="btn" data-tid="${p.id}">${escapeHtml(p.nickname)} (${p.prisonerNo || ''})</button>`
+      ).join('');
+      list.querySelectorAll('[data-tid]').forEach((b) => {
+        b.onclick = () => {
+          const tid = b.getAttribute('data-tid');
+          modal.hidden = true;
+          if (pendingTargetMode === 'provoke') socket.emit('provoke', { targetId: tid });
+          else if (pendingTargetMode === 'fight') socket.emit('fight', { targetId: tid });
+          else if (pendingTargetMode === 'gift') socket.emit('giftInmate', { targetId: tid, amount: 20 });
+          else if (pendingTargetMode === 'bet') {
+            const amount = Number(($('#bet-amount') && $('#bet-amount').value) || 50);
+            socket.emit('betPropose', { targetId: tid, amount });
+          }
+          pendingTargetMode = null;
+        };
+      });
+    }
+    modal.hidden = false;
+  }
+
+  function bindV13Actions() {
+    const map = [
+      ['#dock-provoke', '#mob-provoke', 'provoke'],
+      ['#dock-fight', '#mob-fight', 'fight'],
+      ['#dock-bet', '#mob-bet', 'bet'],
+      ['#dock-gift', '#mob-gift', 'gift'],
+    ];
+    map.forEach(([d, m, mode]) => {
+      const a = $(d); const b = $(m);
+      if (a) a.onclick = () => openTargetPick(mode);
+      if (b) b.onclick = () => openTargetPick(mode);
+    });
+    const x = $('#target-pick-x');
+    if (x) x.onclick = () => { $('#target-pick').hidden = true; };
+    const ok = $('#btn-trial-submit');
+    if (ok) ok.onclick = () => {
+      const answers = $$('#trial-questions .trial-q').map((row) => {
+        const id = row.getAttribute('data-qid');
+        const sel = row.querySelector('input[type=radio]:checked');
+        return { id, choiceIndex: sel ? Number(sel.value) : -1 };
+      });
+      socket.emit('trialAnswer', { answers });
+    };
+    const vo = $('#btn-verdict-ok');
+    if (vo) vo.onclick = () => { $('#verdict-modal').hidden = true; };
+    const ba = $('#btn-bet-accept');
+    const bd = $('#btn-bet-decline');
+    if (ba) ba.onclick = () => {
+      if (pendingBetId) socket.emit('betRespond', { betId: pendingBetId, accept: true });
+      $('#bet-offer-modal').hidden = true; pendingBetId = null;
+    };
+    if (bd) bd.onclick = () => {
+      if (pendingBetId) socket.emit('betRespond', { betId: pendingBetId, accept: false });
+      $('#bet-offer-modal').hidden = true; pendingBetId = null;
+    };
+  }
+
+  function showTrial(info) {
+    const modal = $('#trial-modal');
+    const box = $('#trial-questions');
+    if (!modal || !box) return;
+    $('#trial-title').textContent = (info && info.title) || 'Tòa án';
+    $('#trial-hint').textContent = (info && info.message) || '';
+    box.innerHTML = (info.questions || []).map((q, i) => `
+      <div class="trial-q" data-qid="${escapeHtml(q.id)}" style="text-align:left;margin:10px 0;padding:8px;border:1px solid #333;border-radius:8px">
+        <div><b>Câu ${i + 1}.</b> ${escapeHtml(q.q)}</div>
+        ${(q.choices || []).map((c, ci) => `
+          <label style="display:block;margin:4px 0;font-size:13px">
+            <input type="radio" name="tq_${escapeHtml(q.id)}" value="${ci}" /> ${escapeHtml(c)}
+          </label>`).join('')}
+      </div>`).join('');
+    modal.hidden = false;
+  }
+
   function escapeHtml(s) {
     return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   }
@@ -614,13 +723,13 @@
     const schName = world.schedule ? world.schedule.name : 'Giờ tự do';
     $('#info-time').textContent = `${hh}:${mm} · ${schName}`;
     const chudT = $('#chud-time'); if (chudT) chudT.textContent = `${hh}:${mm}`;
-    const chudS = $('#chud-sent'); if (chudS) chudS.textContent = `⚖️ ${me.sentenceLeftDays != null ? me.sentenceLeftDays : '—'}n`;
+    const chudS = $('#chud-sent'); if (chudS) chudS.textContent = `⚖️ ${(me.sentenceParts && me.sentenceParts.years != null) ? (me.sentenceParts.years + 'y' + me.sentenceParts.hours + 'h') : (me.sentenceLeftDays != null ? me.sentenceLeftDays + 'n' : '—')}`;
     const chudO = $('#chud-online'); if (chudO) chudO.textContent = `👤 ${world.onlineCount || 0}`;
     const npc = world.npcCount != null ? world.npcCount : (config.npcCount || 16);
     $('#info-online').textContent = `👤 ${world.onlineCount || 0} thật · 🤖 ${npc} NPC`;
     $('#info-days').textContent = `✏️ Đã gạch: ${(world.totalDaysMarked || me.daysMarked || 0).toLocaleString('vi-VN')} ngày`;
     $('#info-room').textContent = `🚪 Phòng của bạn: ${roomCode(me.room)}`;
-    $('#info-sentence').textContent = `⚖️ Còn ${me.sentenceLeftDays} ngày · 🏅 ${me.rehabRatingLabel || 'Kém'} (${me.rehabPoints || 0}đ)`;
+    $('#info-sentence').textContent = `⚖️ Còn ${me.sentenceLabel || (me.sentenceLeftDays + ' ngày')} · 🏅 ${me.rehabRatingLabel || 'Kém'} (${me.rehabPoints || 0}đ)`;
     const rk = me.rank || {};
     const rankEl = $('#info-rank');
     const isGuard = me.role === 'guard';
@@ -671,17 +780,22 @@
       if (line) line.hidden = true;
       return;
     }
-    const need = me.intakeNeedMs || (config.intakeNeedMs) || 300000;
-    const cur = me.intakeChatMs || 0;
-    const pct = Math.min(100, Math.floor((cur / need) * 100));
-    const left = Math.ceil((need - cur) / 1000);
+    const leftMs = me.intakeLeftMs != null ? me.intakeLeftMs : 120000;
+    const left = Math.max(0, Math.ceil(leftMs / 1000));
+    const cuts = me.intakeCuts || {};
+    const cutTxt = [
+      cuts.exercise ? '✓thể dục' : 'thể dục−30s',
+      cuts.talk ? '✓nói chuyện' : 'nói chuyện−30s',
+      cuts.gift ? '✓tặng quà' : 'tặng quà−30s',
+    ].join(' · ');
     if (ban) {
       ban.hidden = false;
-      $('#intake-text').textContent = `🚧 Khu tạm giam · tiếp nhận ${pct}% · còn ~${left}s nói chuyện`;
+      const t = $('#intake-text');
+      if (t) t.textContent = `🚧 Tạm giam còn ~${left}s · ${cutTxt}`;
     }
     if (line) {
       line.hidden = false;
-      line.textContent = `🚧 Tiếp nhận: ${pct}% (${Math.floor(cur/1000)}/${Math.floor(need/1000)}s)`;
+      line.textContent = `🚧 Tạm giam: còn ${left}s`;
     }
   }
 
@@ -1410,6 +1524,7 @@
       updatePreviewCard();
     }
     fillSecuritySelects();
+    bindV13Actions();
     const sess = loadSession();
     const su = sessionUsername(sess);
     if (su && $('#login-nick')) $('#login-nick').value = su;
@@ -1454,6 +1569,57 @@
     if (me) me.needsSecurity = false;
     toast('Đã lưu câu hỏi bảo mật');
   });
+
+  socket.on('trialStart', (info) => {
+    showTrial(info || {});
+    toast('Phiên tòa bắt đầu');
+  });
+  socket.on('trialVerdict', (info) => {
+    if ($('#trial-modal')) $('#trial-modal').hidden = true;
+    const modal = $('#verdict-modal');
+    if (modal) {
+      $('#verdict-title').textContent = (info && info.title) || 'Phán quyết';
+      $('#verdict-body').textContent = (info && info.message) || '';
+      modal.hidden = false;
+    }
+    toast((info && info.title) || 'Phán quyết');
+  });
+  socket.on('releaseCeremony', (info) => {
+    const modal = $('#release-modal');
+    if (!modal) return;
+    $('#release-body').textContent = `${(info && info.message) || ''} Trợ cấp: ${(info && info.stipend) || 0} xu. ${(info && info.stipendNote) || ''}`;
+    const box = $('#release-options');
+    box.innerHTML = (info.options || []).map((o) =>
+      `<button type="button" class="btn pri" data-rel="${o.id}">${escapeHtml(o.label)}</button>`
+    ).join('');
+    box.querySelectorAll('[data-rel]').forEach((b) => {
+      b.onclick = () => {
+        socket.emit('releaseChoice', { choice: b.getAttribute('data-rel') });
+        modal.hidden = true;
+      };
+    });
+    modal.hidden = false;
+  });
+  socket.on('betOffer', (info) => {
+    pendingBetId = info && info.betId;
+    $('#bet-offer-text').textContent = (info && info.message) || '';
+    $('#bet-offer-modal').hidden = false;
+  });
+  socket.on('betResult', (info) => {
+    toast((info && info.message) || 'Kết quả cá độ');
+  });
+  socket.on('violationCaught', (info) => {
+    toast('🚨 Vi phạm bị ghi sổ — án tăng!');
+  });
+  socket.on('violationFx', (fx) => {
+    if (!fx) return;
+    if (fx.kind === 'fight' && world3d && !world3d.fallback) {
+      // soft camera shake / toast only
+      toast('🥊 Đánh lộn chibi!');
+    } else if (fx.kind === 'provoke') toast('😤 Kiếm chuyện!');
+    else if (fx.kind === 'bet') toast('🎲 Cá độ!');
+  });
+
 
   socket.on('joined', (info) => {
     $('#join-screen').hidden = true;

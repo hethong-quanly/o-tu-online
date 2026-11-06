@@ -8,6 +8,12 @@ const { createClient } = require('@supabase/supabase-js');
 const v6 = require('./lib/v7');
 const performLib = require('./lib/perform');
 const auth = require('./lib/auth');
+const trialLib = require('./lib/trial');
+const violLib = require('./lib/violations');
+const sentenceLib = require('./lib/sentence');
+const pendingBets = new Map(); // betId -> { fromId, toId, amount, exp }
+const activeTrials = new Map(); // socketId -> { questions, startedAt }
+
 const activeShows = new Map(); // showId -> { performerId, kind, x, z, cheers:Set, until, quality }
 
 const PORT = process.env.PORT || 3847;
@@ -22,7 +28,7 @@ const supabase = useSupabase
   : null;
 const MAX_PLAYERS = Math.max(1, parseInt(process.env.MAX_PLAYERS || '10000', 10) || 10000);
 const NPC_COUNT = Math.max(0, parseInt(process.env.NPC_COUNT || '16', 10) || 16);
-const VERSION = '3d-v12';
+const VERSION = '3d-v13';
 
 /** Guard NPCs — patrol, vision, bribe window (in-game money only) */
 const GUARD_DEFS = [
@@ -280,13 +286,16 @@ const CRIMES = [
 ];
 
 const SENTENCE_OPTIONS = [
-  { id: '1m', label: '1 tháng', days: 30 },
-  { id: '3m', label: '3 tháng', days: 90 },
-  { id: '6m', label: '6 tháng', days: 180 },
-  { id: '1y', label: '1 năm', days: 365 },
-  { id: '2y', label: '2 năm', days: 730 },
-  { id: '5y', label: '5 năm (nặng!)', days: 1825 },
+  { id: '1m', label: 'Chờ Tòa án (tạm)', days: 30, yearsHint: 1 },
+  { id: '3m', label: 'Chờ Tòa án (tạm)', days: 90, yearsHint: 1 },
+  { id: '6m', label: 'Chờ Tòa án (tạm)', days: 180, yearsHint: 2 },
+  { id: '1y', label: 'Chờ Tòa án — án do xét xử', days: 365, yearsHint: 1 },
+  { id: '2y', label: 'Chờ Tòa án — án do xét xử', days: 730, yearsHint: 2 },
+  { id: '5y', label: 'Chờ Tòa án — án do xét xử', days: 1825, yearsHint: 5 },
 ];
+const RELEASE_STIPEND = 300; // in-game trợ cấp (future: real top-up reward)
+const INTAKE_DEFAULT_MS = Math.max(3000, parseInt(process.env.INTAKE_MS || '120000', 10) || 120000);
+
 
 const SCHEDULE = [
   { id: 'an', name: 'Giờ ăn', emoji: '🍲', roomHint: 'nha_bep', seconds: 55, graceSec: 12, announce: '📢 Quản giáo: Giờ ăn! Vào Nhà ăn / Căn tin / Bếp. Vắng mặt sẽ bị trừ điểm.' },
@@ -358,9 +367,10 @@ function ratingFromPoints(pts) {
 }
 
 function reductionForRating(id) {
-  if (id === 'tot') return 5;
-  if (id === 'kha') return 3;
-  if (id === 'tb') return 1;
+  // returns hours of online sentence cut (reconcile with rehab system)
+  if (id === 'tot') return 10;
+  if (id === 'kha') return 6;
+  if (id === 'tb') return 2;
   return 0;
 }
 
@@ -462,6 +472,16 @@ function defaultPlayer(payload, socketId) {
     zone: 'quarantine',
     intakeChatMs: 0,
     intakeDone: false,
+    trialDone: false,
+    intakeStartedAt: Date.now(),
+    intakeDurationMs: INTAKE_DEFAULT_MS,
+    intakeCuts: { exercise: false, talk: false, gift: false },
+    sentenceYears: 0,
+    sentenceOnlineMsTotal: 0,
+    sentenceOnlineMsLeft: 0,
+    onlineMsServed: 0,
+    violations: [],
+    visitorMode: false,
     happinessUnlocked: false,
     x: -42 + (Math.random() - 0.5) * 6,
     z: -8 + (Math.random() - 0.5) * 6,
@@ -505,6 +525,7 @@ function defaultPlayer(payload, socketId) {
     zone: 'quarantine',
     intakeChatMs: 0,
     intakeDone: false,
+    trialDone: false,
     happinessUnlocked: false,
     lastTalkAt: 0,
   };
@@ -557,6 +578,7 @@ function ensureAccountFields(p) {
   if (p.nicknameChosen == null) p.nicknameChosen = true;
   if (p.securityQuestionId == null) p.securityQuestionId = null;
   if (p.securityAnswerHash == null) p.securityAnswerHash = null;
+  sentenceLib.ensureSentenceFields(p);
   return p;
 }
 
@@ -819,9 +841,21 @@ function publicPlayer(p) {
     zone: p.zone || (p.intakeDone ? 'general' : 'quarantine'),
     intakeDone: !!p.intakeDone,
     intakeChatMs: p.intakeChatMs || 0,
-    intakeNeedMs: v6.INTAKE_NEED_MS,
+    intakeNeedMs: INTAKE_DEFAULT_MS,
     questsPct: v6.questsCompletePct(p),
     happinessUnlocked: v6.happinessUnlocked(p),
+    trialDone: !!p.trialDone,
+    intakeStartedAt: p.intakeStartedAt || null,
+    intakeDurationMs: p.intakeDurationMs != null ? p.intakeDurationMs : INTAKE_DEFAULT_MS,
+    intakeLeftMs: (!p.intakeDone && p.role !== 'guard') ? sentenceLib.intakeRemainingMs(p) : 0,
+    intakeCuts: p.intakeCuts || { exercise: false, talk: false, gift: false },
+    intakeNeedMs: INTAKE_DEFAULT_MS,
+    sentenceYears: p.sentenceYears || 0,
+    sentenceOnlineMsLeft: Math.max(0, p.sentenceOnlineMsLeft || 0),
+    sentenceLabel: sentenceLib.formatRemaining(p).label,
+    sentenceParts: sentenceLib.formatRemaining(p),
+    violations: (p.violations || []).slice(-12),
+    visitorMode: !!p.visitorMode,
   };
 }
 
@@ -1054,80 +1088,171 @@ function setEmote(p, emote, ms) {
 }
 
 function tryRelease(p, socket, reason) {
-  if (p.released || p.escaped) return false;
-  if ((p.sentenceLeftDays || 0) > 0) return false;
+  if (!p || p.escaped) return false;
+  if (p.role === 'guard') return false;
+  sentenceLib.ensureSentenceFields(p);
+  if ((p.sentenceOnlineMsLeft || 0) > 0 && (p.sentenceLeftDays || 0) > 0) return false;
+  if ((p.sentenceOnlineMsLeft || 0) > 0) return false;
+  if (p.released && p.visitorMode) return false;
   p.released = true;
-  p.earlyRelease = (p.daysServed || 0) < (p.sentenceTotalDays || 0);
+  p.earlyRelease = (p.onlineMsServed || 0) < (p.sentenceOnlineMsTotal || 0) * 0.85;
   p.releasedAt = Date.now();
   p.sentenceLeftDays = 0;
+  p.sentenceOnlineMsLeft = 0;
+  const stipend = RELEASE_STIPEND;
+  p.money = (p.money || 0) + stipend;
   ensureAccountFields(p); playersByNick[accountKey(p)] = stripTransient(p);
-  saveData();
-  const msg = p.earlyRelease
-    ? `🕊️ ${p.nickname} được RA TÙ SỚM nhờ cải tạo tốt! (${p.daysServed}/${p.sentenceTotalDays} ngày)`
-    : `🕊️ ${p.nickname} đã MÃN HẠN — lễ trao giấy ra trại!`;
+  void saveData();
+  const msg = `🕊️ ${p.nickname} được THẢ TỰ DO — nhận trợ cấp ${stipend} xu in-game (sau này có thể đổi thưởng nạp tiền).`;
   pushChat({ type: 'system', text: msg, ts: Date.now() });
   if (socket) {
+    socket.emit('releaseCeremony', {
+      early: !!p.earlyRelease,
+      stipend,
+      stipendNote: 'Tiền trợ cấp in-game. Nếu sau này có nạp tiền, phần thưởng có thể quy đổi tương ứng.',
+      message: reason || 'Án đã hết. Lễ thả tự do!',
+      canBecomeGuard: true,
+      options: [
+        { id: 'visitor', label: 'Ở lại thăm trại (khách tự do)' },
+        { id: 'newlife', label: 'Bắt đầu đời mới (tạo án mới qua tạm giam)' },
+        { id: 'guard', label: 'Xin làm Quản giáo (nếu đủ điều kiện vượt ngục trước đây / chọn đường quản giáo)' },
+      ],
+    });
     socket.emit('released', {
       early: p.earlyRelease,
       daysServed: p.daysServed,
       sentenceTotalDays: p.sentenceTotalDays,
-      message: reason || (p.earlyRelease ? 'Chúc mừng! Bạn được giảm án và mãn hạn sớm.' : 'Án đã hết. Bạn được trả tự do.'),
+      stipend,
+      message: reason || 'Án đã hết. Bạn được trả tự do.',
     });
   }
   emitSelf(socket, p);
   broadcastState();
-  setTimeout(() => {
-    online.delete(socket.id);
-    broadcastState();
-  }, 2500);
   return true;
 }
 
+function startTrialFor(socket, p) {
+  if (!p || p.trialDone || p.role === 'guard') return;
+  const questions = trialLib.pickTrialQuestions();
+  activeTrials.set(socket.id, { questions, startedAt: Date.now(), nick: p.nickname });
+  socket.emit('trialStart', {
+    title: 'Tòa án',
+    message: 'Phiên tòa xét xử — trả lời 5 câu hỏi. Đúng 5/5 = Vô tội + thưởng. Sai N câu = án N năm (1 năm = 120 giờ online).',
+    questions,
+    rewardNote: 'Thưởng vô tội là xu in-game; sau này nếu có nạp tiền có thể quy đổi thưởng thật.',
+  });
+}
+
+function finishIntakeStartTrial(socket, p) {
+  if (!p || p.intakeDone) return;
+  p.intakeDone = true; // leave quarantine geometry but await trial
+  p.zone = 'general';
+  if (p.cellId && ROOM_BY_ID[p.cellId]) {
+    p.room = p.cellId;
+    p.x = ROOM_BY_ID[p.cellId].x;
+    p.z = ROOM_BY_ID[p.cellId].z;
+  } else {
+    p.room = 'san_tap';
+  }
+  emitSelf(socket, p);
+  broadcastState();
+  startTrialFor(socket, p);
+}
+
+function recordViolation(p, kind, extra) {
+  const sev = violLib.SEVERITY[kind];
+  if (!sev) return null;
+  const entry = {
+    id: uid(),
+    kind,
+    label: sev.label,
+    at: Date.now(),
+    yearsAdd: sev.yearsAdd,
+    ...(extra || {}),
+  };
+  if (!Array.isArray(p.violations)) p.violations = [];
+  p.violations.push(entry);
+  if (p.violations.length > 40) p.violations = p.violations.slice(-40);
+  sentenceLib.addSentenceYears(p, sev.yearsAdd);
+  return entry;
+}
+
+
 function tickSentenceDay(p, socket) {
-  if (p.escaped || p.released) return;
+  if (p.escaped || p.released || p.visitorMode) return;
+  if (!p.intakeDone || !p.trialDone) return;
+  sentenceLib.ensureSentenceFields(p);
   p.daysServed = (p.daysServed || 0) + 1;
-  p.sentenceLeftDays = Math.max(0, (p.sentenceLeftDays || 0) - 1);
   p.daysSinceReview = (p.daysSinceReview || 0) + 1;
 
-  // schedule presence bonus already tracked separately
   if (p.daysSinceReview >= REVIEW_EVERY_DAYS) {
     p.daysSinceReview = 0;
     const rating = ratingFromPoints(p.rehabPoints || 0);
     p.rehabRating = rating.id;
-    const cut = reductionForRating(rating.id);
-    if (cut > 0 && p.sentenceLeftDays > 0) {
-      p.sentenceLeftDays = Math.max(0, p.sentenceLeftDays - cut);
+    const cutHours = reductionForRating(rating.id);
+    if (cutHours > 0 && (p.sentenceOnlineMsLeft || 0) > 0) {
+      sentenceLib.cutOnlineMs(p, cutHours * sentenceLib.MS_PER_HOUR);
+      const parts = sentenceLib.formatRemaining(p);
       if (socket) {
         socket.emit('sentenceReview', {
           rating: rating.label,
-          cut,
-          left: Math.ceil(p.sentenceLeftDays),
-          message: `📜 Hội đồng cải tạo: xếp loại ${rating.label} → giảm ${cut} ngày án. Còn ${Math.ceil(p.sentenceLeftDays)} ngày.`,
+          cut: cutHours,
+          cutUnit: 'hours',
+          left: parts.label,
+          message: `📜 Hội đồng cải tạo: xếp loại ${rating.label} → giảm ${cutHours} giờ online. Còn ${parts.label}.`,
         });
       }
-      pushChat({ type: 'system', text: `📜 ${p.nickname} được giảm ${cut} ngày (xếp loại ${rating.label}).`, ts: Date.now() });
+      pushChat({ type: 'system', text: `📜 ${p.nickname} được giảm ${cutHours} giờ online (xếp loại ${rating.label}).`, ts: Date.now() });
     } else if (socket) {
+      const parts = sentenceLib.formatRemaining(p);
       socket.emit('sentenceReview', {
         rating: rating.label,
         cut: 0,
-        left: Math.ceil(p.sentenceLeftDays),
+        left: parts.label,
         message: `📜 Hội đồng cải tạo: xếp loại ${rating.label}. Chưa đủ điều kiện giảm án.`,
       });
     }
   }
   unlockAchievements(p, socket);
-  if (p.sentenceLeftDays <= 0) tryRelease(p, socket);
+  if ((p.sentenceOnlineMsLeft || 0) <= 0) tryRelease(p, socket);
 }
 
 setInterval(() => {
-  for (const p of online.values()) {
-    if (p.escaped || p.released) continue;
-    const bedBonus = (p.upgrades.giuong || 0) * 0.5;
-    const sleepBonus = p.sleeping ? 3 : 0;
-    p.energy = Math.min(p.maxEnergy, p.energy + 2 + bedBonus + sleepBonus);
-    p.health = Math.min(p.maxHealth, p.health + 0.5 + (p.upgrades.giuong || 0) * 0.2 + (p.sleeping ? 1 : 0));
-    if (p.emote && Date.now() > p.emoteUntil) p.emote = null;
-    p.lastActive = Date.now();
+  const now = Date.now();
+  for (const [sid, p] of online) {
+    if (p.escaped) continue;
+    if (!p.released) {
+      const bedBonus = (p.upgrades.giuong || 0) * 0.5;
+      const sleepBonus = p.sleeping ? 3 : 0;
+      p.energy = Math.min(p.maxEnergy, p.energy + 2 + bedBonus + sleepBonus);
+      p.health = Math.min(p.maxHealth, p.health + 0.5 + (p.upgrades.giuong || 0) * 0.2 + (p.sleeping ? 1 : 0));
+    }
+    if (p.emote && now > p.emoteUntil) p.emote = null;
+    p.lastActive = now;
+
+    // Intake countdown → trial
+    if (!p.intakeDone && p.role !== 'guard' && !p.released) {
+      sentenceLib.ensureSentenceFields(p);
+      if (!p.intakeStartedAt) p.intakeStartedAt = now;
+      const left = sentenceLib.intakeRemainingMs(p, now);
+      const sock = io.sockets.sockets.get(sid);
+      if (left <= 0 && sock) {
+        finishIntakeStartTrial(sock, p);
+      }
+    }
+
+    // Online sentence time (real time while connected)
+    if (!p.released && p.intakeDone && p.trialDone && p.role !== 'guard' && !p.visitorMode) {
+      const due = sentenceLib.tickOnline(p, 5000);
+      if (due) {
+        const sock = io.sockets.sockets.get(sid);
+        tryRelease(p, sock, 'Mãn hạn theo giờ online.');
+      }
+    }
+  }
+  // expire bets
+  for (const [bid, b] of pendingBets) {
+    if (b.exp < now) pendingBets.delete(bid);
   }
   broadcastState();
 }, 5000);
@@ -1310,6 +1435,9 @@ io.on('connection', (socket) => {
     schedule: currentSchedule(), dayTickMs: DAY_TICK_MS, reviewEveryDays: REVIEW_EVERY_DAYS,
     maxPlayers: MAX_PLAYERS, npcCount: NPC_COUNT, version: VERSION,
     securityQuestions: auth.SECURITY_QUESTIONS,
+    trial: trialLib.publicQuestionBankMeta(),
+    releaseStipend: RELEASE_STIPEND,
+    hoursPerYear: 120,
   });
   socket.emit('chatHistory', chatHistory);
   socket.emit('schedule', currentSchedule());
@@ -1459,6 +1587,13 @@ io.on('connection', (socket) => {
     if (p.performCount == null) p.performCount = 0;
     if (p.cheerCount == null) p.cheerCount = 0;
     if (!Array.isArray(p.performHourTs)) p.performHourTs = [];
+    sentenceLib.ensureSentenceFields(p);
+    if (p.intakeDone && p.trialDone == null) p.trialDone = true;
+    if (!p.intakeDone) {
+      if (!p.intakeStartedAt) p.intakeStartedAt = Date.now();
+      if (p.intakeDurationMs == null) p.intakeDurationMs = INTAKE_DEFAULT_MS;
+      if (!p.intakeCuts) p.intakeCuts = { exercise: false, talk: false, gift: false };
+    }
     return p;
   }
 
@@ -1663,6 +1798,14 @@ io.on('connection', (socket) => {
       p.securityQuestionId = q.id;
       p.securityAnswerHash = securityAnswerHash;
       p.authSessions = [];
+      p.intakeDone = false;
+      p.trialDone = false;
+      p.intakeStartedAt = Date.now();
+      p.intakeDurationMs = INTAKE_DEFAULT_MS;
+      p.intakeCuts = { exercise: false, talk: false, gift: false };
+      sentenceLib.setSentenceYears(p, 0);
+      p.room = 'khu_tam_giam';
+      p.zone = 'quarantine';
       const sess = auth.issueSession(p);
       await enterGame(socket, p, key, { isNew: true, sessionToken: sess.token });
     } catch (e) {
@@ -1892,7 +2035,13 @@ io.on('connection', (socket) => {
       if (p.energy < 5) { socket.emit('errorMsg', 'Không đủ năng lượng để hít đất.'); return; }
       p.energy -= 5;
       setEmote(p, 'pushup', 8000);
-      socket.emit('actionResult', { kind, message: 'Hít đất! (chỉ tập luyện)' });
+      let msg = 'Hít đất / thể dục!';
+      if (!p.intakeDone && p.role !== 'guard') {
+        const cut = sentenceLib.applyIntakeCut(p, 'exercise', 30000);
+        if (cut.ok) msg = `Thể dục −30s tạm giam! Còn ~${Math.ceil(cut.leftMs/1000)}s.`;
+        else if (cut.error) msg = `Hít đất! (${cut.error})`;
+      }
+      socket.emit('actionResult', { kind, message: msg });
     } else if (kind === 'wave') {
       setEmote(p, 'wave', 5000);
       pushChat({ type: 'system', text: `${p.nickname} vẫy tay chào mọi người.`, ts: now });
@@ -2229,52 +2378,319 @@ io.on('connection', (socket) => {
     const msg = String(text || '').trim().slice(0, 200).replace(/[<>]/g, '');
     if (!msg) return;
     pushChat({ type: 'user', nick: p.nickname, text: msg, ts: Date.now() });
-    if (!p.intakeDone && p.role !== 'guard') {
-      const done = v6.creditIntake(p, v6.CHAT_CREDIT_MS, socket, pushChat);
-      emitSelf(socket, p);
-      if (done) {
-        const cell = ROOM_BY_ID[p.cellId];
-        if (cell) { p.x = cell.x; p.z = cell.z; p.room = cell.id; }
-        saveData();
-        broadcastState();
-      }
-    }
+    emitSelf(socket, p);
   });
 
   socket.on('talk', () => {
     const p = online.get(socket.id);
-    if (!p || p.escaped || (p.released && p.role !== 'guard')) return;
+    if (!p || p.escaped || (p.released && p.role !== 'guard' && !p.visitorMode)) return;
     const now = Date.now();
-    if ((p.lastTalkAt || 0) + 1000 > now) return; // ~1s / tick → 5 phút wall-clock nếu chỉ bấm Nói chuyện
+    if ((p.lastTalkAt || 0) + 1500 > now) return;
     p.lastTalkAt = now;
+    setEmote(p, 'wave', 2000);
     if (!p.intakeDone && p.role !== 'guard') {
-      // Must be in quarantine near cán bộ (room khu_tam_giam)
       if (p.room !== 'khu_tam_giam') {
-        socket.emit('errorMsg', 'Hãy ở Khu tạm giam và nói chuyện với cán bộ tiếp nhận.');
+        socket.emit('errorMsg', 'Hãy ở Khu tạm giam để nói chuyện giảm thời gian tạm giam.');
         return;
       }
-      setEmote(p, 'wave', 2000);
-      const done = v6.creditIntake(p, v6.TALK_TICK_MS, socket, pushChat); // +1s mỗi lần nói
-      const left = Math.max(0, v6.INTAKE_NEED_MS - (p.intakeChatMs || 0));
+      const cut = sentenceLib.applyIntakeCut(p, 'talk', 30000);
+      const left = sentenceLib.intakeRemainingMs(p);
       socket.emit('actionResult', {
         kind: 'talk',
-        message: done
-          ? 'Hoàn thành tiếp nhận!'
-          : `Nói chuyện với cán bộ… còn ~${Math.ceil(left / 1000)}s (${Math.floor(((p.intakeChatMs || 0) / v6.INTAKE_NEED_MS) * 100)}%)`,
+        message: cut.ok
+          ? `Nói chuyện −30s tạm giam! Còn ~${Math.ceil(left/1000)}s.`
+          : (cut.error || 'Nói chuyện với cán bộ.'),
       });
-      if (done) {
-        const cell = ROOM_BY_ID[p.cellId];
-        if (cell) { p.x = cell.x; p.z = cell.z; p.room = cell.id; }
-        saveData();
-      }
+      if (left <= 0) finishIntakeStartTrial(socket, p);
       emitSelf(socket, p);
       broadcastState();
     } else {
-      setEmote(p, 'wave', 2000);
       socket.emit('actionResult', { kind: 'talk', message: 'Bạn trò chuyện với mọi người xung quanh.' });
       emitSelf(socket, p);
       broadcastState();
     }
+  });
+
+
+  socket.on('giftInmate', (payload) => {
+    const p = online.get(socket.id);
+    if (!p || p.escaped || p.released) return;
+    const targetId = payload && payload.targetId;
+    const amount = Math.floor(Number(payload && payload.amount) || 20);
+    const target = [...online.values()].find((x) => x.id === targetId);
+    if (!target || target.id === p.id) { socket.emit('errorMsg', 'Chọn phạm nhân khác để tặng.'); return; }
+    if (!violLib.nearby(p, target, 12)) { socket.emit('errorMsg', 'Đến gần hơn để cá độ.'); return; }
+    if (amount < 10) { socket.emit('errorMsg', 'Quà tối thiểu 10 xu.'); return; }
+    if ((p.money || 0) < amount) { socket.emit('errorMsg', 'Không đủ xu để tặng.'); return; }
+    p.money -= amount;
+    target.money = (target.money || 0) + amount;
+    setEmote(p, 'wave', 3000);
+    setEmote(target, 'wave', 3000);
+    let msg = `Bạn tặng ${amount} xu cho ${target.nickname}.`;
+    if (!p.intakeDone && p.role !== 'guard') {
+      const cut = sentenceLib.applyIntakeCut(p, 'gift', 30000);
+      if (cut.ok) msg += ` (−30s tạm giam, còn ~${Math.ceil(cut.leftMs/1000)}s)`;
+      if (sentenceLib.intakeRemainingMs(p) <= 0) finishIntakeStartTrial(socket, p);
+    }
+    pushChat({ type: 'system', text: `🎁 ${p.nickname} tặng ${amount} xu cho ${target.nickname}.`, ts: Date.now() });
+    socket.emit('actionResult', { kind: 'gift', message: msg });
+    const ts = [...online.entries()].find(([, pl]) => pl.id === target.id);
+    if (ts) emitSelf(io.sockets.sockets.get(ts[0]), target);
+    emitSelf(socket, p);
+    broadcastState();
+  });
+
+  socket.on('provoke', (payload) => {
+    const p = online.get(socket.id);
+    if (!p || p.escaped || p.released || p.role === 'guard' || p.visitorMode) return;
+    if (!p.intakeDone || !p.trialDone) { socket.emit('errorMsg', 'Hoàn thành tạm giam & tòa án trước.'); return; }
+    const now = Date.now();
+    if ((p.cooldowns.provoke || 0) > now) { socket.emit('errorMsg', 'Chờ đã rồi mới kiếm chuyện tiếp.'); return; }
+    const target = [...online.values()].find((x) => x.id === (payload && payload.targetId));
+    if (!target || target.id === p.id) { socket.emit('errorMsg', 'Chọn mục tiêu gần bạn.'); return; }
+    if (!violLib.nearby(p, target, 10)) { socket.emit('errorMsg', 'Đến gần hơn để đánh lộn.'); return; }
+    p.cooldowns.provoke = now + violLib.COOLDOWN_MS.provoke;
+    setEmote(p, 'provoke', 5000);
+    setEmote(target, 'wave', 2000);
+    io.emit('violationFx', { kind: 'provoke', fromId: p.id, toId: target.id, x: p.x, z: p.z });
+    let gpos = GUARD_DEFS;
+    try { gpos = publicGuards(); } catch (_) {}
+    const det = violLib.detectionRoll('provoke', p, gpos);
+    let message = `${p.nickname} kiếm chuyện với ${target.nickname}!`;
+    if (det.caught) {
+      const entry = recordViolation(p, 'provoke', { target: target.nickname });
+      message += ` 🚨 Camera/cán bộ phát hiện — +${violLib.SEVERITY.provoke.yearsAdd} năm án!`;
+      socket.emit('violationCaught', { entry, sentence: sentenceLib.formatRemaining(p) });
+      pushChat({ type: 'system', text: `🚨 ${p.nickname} bị ghi nhận vi phạm: Kiếm chuyện (+án).`, ts: now });
+    } else {
+      message += ' (may mắn chưa bị bắt)';
+      pushChat({ type: 'system', text: message, ts: now });
+    }
+    socket.emit('actionResult', { kind: 'provoke', message });
+    emitSelf(socket, p);
+    broadcastState();
+  });
+
+  socket.on('fight', (payload) => {
+    const p = online.get(socket.id);
+    if (!p || p.escaped || p.released || p.role === 'guard' || p.visitorMode) return;
+    if (!p.intakeDone || !p.trialDone) { socket.emit('errorMsg', 'Hoàn thành tạm giam & tòa án trước.'); return; }
+    const now = Date.now();
+    if ((p.cooldowns.fight || 0) > now) { socket.emit('errorMsg', 'Hãy nghỉ đã — vừa đánh lộn xong.'); return; }
+    const target = [...online.values()].find((x) => x.id === (payload && payload.targetId));
+    if (!target || target.id === p.id) { socket.emit('errorMsg', 'Chọn đối thủ gần bạn.'); return; }
+    if (target.role === 'guard') { socket.emit('errorMsg', 'Không được đánh quản giáo.'); return; }
+    if (!violLib.nearby(p, target, 10)) { socket.emit('errorMsg', 'Đến gần hơn để đánh lộn.'); return; }
+    p.cooldowns.fight = now + violLib.COOLDOWN_MS.fight;
+    target.cooldowns = target.cooldowns || {};
+    target.cooldowns.fight = now + Math.floor(violLib.COOLDOWN_MS.fight / 2);
+    setEmote(p, 'fight', 7000);
+    setEmote(target, 'fight', 7000);
+    p.energy = Math.max(0, (p.energy || 0) - 8);
+    target.energy = Math.max(0, (target.energy || 0) - 8);
+    io.emit('violationFx', { kind: 'fight', fromId: p.id, toId: target.id, x: (p.x+target.x)/2, z: (p.z+target.z)/2 });
+    let gpos = GUARD_DEFS;
+    try { gpos = publicGuards(); } catch (_) {}
+    const det = violLib.detectionRoll('fight', p, gpos);
+    let message = `🥊 ${p.nickname} và ${target.nickname} đánh lộn chibi (không máu me)!`;
+    if (det.caught) {
+      const e1 = recordViolation(p, 'fight', { target: target.nickname });
+      const e2 = recordViolation(target, 'fight', { target: p.nickname });
+      message += ` 🚨 Bị bắt — cả hai bị cộng án!`;
+      socket.emit('violationCaught', { entry: e1, sentence: sentenceLib.formatRemaining(p) });
+      const tEntry = [...online.entries()].find(([, pl]) => pl.id === target.id);
+      if (tEntry) {
+        const tsock = io.sockets.sockets.get(tEntry[0]);
+        if (tsock) {
+          tsock.emit('violationCaught', { entry: e2, sentence: sentenceLib.formatRemaining(target) });
+          emitSelf(tsock, target);
+        }
+      }
+      pushChat({ type: 'system', text: `🚨 Đánh lộn: ${p.nickname} & ${target.nickname} bị ghi sổ (+án).`, ts: now });
+    } else {
+      pushChat({ type: 'system', text: message + ' (lọt mắt xanh)', ts: now });
+    }
+    socket.emit('actionResult', { kind: 'fight', message });
+    emitSelf(socket, p);
+    broadcastState();
+  });
+
+  socket.on('betPropose', (payload) => {
+    const p = online.get(socket.id);
+    if (!p || p.escaped || p.released || p.role === 'guard' || p.visitorMode) return;
+    if (!p.intakeDone || !p.trialDone) { socket.emit('errorMsg', 'Hoàn thành tạm giam & tòa án trước.'); return; }
+    const now = Date.now();
+    if ((p.cooldowns.bet || 0) > now) { socket.emit('errorMsg', 'Chờ chút rồi cá độ tiếp.'); return; }
+    const target = [...online.values()].find((x) => x.id === (payload && payload.targetId));
+    if (!target || target.id === p.id) { socket.emit('errorMsg', 'Chọn người chơi để cá độ.'); return; }
+    if (!violLib.nearby(p, target, 12)) { socket.emit('errorMsg', 'Đến gần hơn để cá độ.'); return; }
+    const chk = violLib.validateBetAmount(payload && payload.amount);
+    if (!chk.ok) { socket.emit('errorMsg', chk.error); return; }
+    if ((p.money || 0) < chk.amount || (target.money || 0) < chk.amount) {
+      socket.emit('errorMsg', 'Cả hai phải có đủ xu để cược.'); return;
+    }
+    const betId = uid();
+    pendingBets.set(betId, { fromId: p.id, toId: target.id, amount: chk.amount, exp: now + violLib.BET_EXPIRE_MS });
+    p.cooldowns.bet = now + 5000;
+    const tEntry = [...online.entries()].find(([, pl]) => pl.id === target.id);
+    if (tEntry) {
+      const tsock = io.sockets.sockets.get(tEntry[0]);
+      if (tsock) {
+        tsock.emit('betOffer', {
+          betId, fromId: p.id, fromNick: p.nickname, amount: chk.amount,
+          message: `${p.nickname} mời cá độ ${chk.amount} xu (tung đồng xu). Bạn phải đồng ý.`,
+        });
+      }
+    }
+    socket.emit('actionResult', { kind: 'bet', message: `Đã gửi lời mời cá độ ${chk.amount} xu tới ${target.nickname}.` });
+  });
+
+  socket.on('betRespond', (payload) => {
+    const p = online.get(socket.id);
+    if (!p) return;
+    const betId = payload && payload.betId;
+    const accept = !!(payload && payload.accept);
+    const bet = pendingBets.get(betId);
+    if (!bet || bet.toId !== p.id) { socket.emit('errorMsg', 'Lời mời cá độ không còn hiệu lực.'); return; }
+    pendingBets.delete(betId);
+    if (!accept) {
+      const fromEntry = [...online.entries()].find(([, pl]) => pl.id === bet.fromId);
+      if (fromEntry) {
+        const fsock = io.sockets.sockets.get(fromEntry[0]);
+        if (fsock) fsock.emit('actionResult', { kind: 'bet', message: `${p.nickname} từ chối cá độ.` });
+      }
+      socket.emit('actionResult', { kind: 'bet', message: 'Bạn đã từ chối cá độ.' });
+      return;
+    }
+    const a = [...online.values()].find((x) => x.id === bet.fromId);
+    const b = p;
+    if (!a || !b) return;
+    if ((a.money || 0) < bet.amount || (b.money || 0) < bet.amount) {
+      socket.emit('errorMsg', 'Không đủ xu để khớp cược.'); return;
+    }
+    const now = Date.now();
+    a.cooldowns = a.cooldowns || {};
+    a.cooldowns.bet = now + violLib.COOLDOWN_MS.bet;
+    b.cooldowns.bet = now + violLib.COOLDOWN_MS.bet;
+    const flip = Math.random() < 0.5 ? 'a' : 'b';
+    const winner = flip === 'a' ? a : b;
+    const loser = flip === 'a' ? b : a;
+    loser.money -= bet.amount;
+    winner.money += bet.amount;
+    io.emit('violationFx', { kind: 'bet', fromId: a.id, toId: b.id, x: a.x, z: a.z, winnerId: winner.id, amount: bet.amount });
+    let gpos = GUARD_DEFS;
+    try { gpos = publicGuards(); } catch (_) {}
+    const det = violLib.detectionRoll('bet', a, gpos);
+    let note = `🎲 Cá độ: ${winner.nickname} thắng ${bet.amount} xu (đồng xu).`;
+    if (det.caught) {
+      recordViolation(a, 'bet', { with: b.nickname, amount: bet.amount });
+      recordViolation(b, 'bet', { with: a.nickname, amount: bet.amount });
+      note += ' 🚨 Camera ghi nhận cá độ — cả hai bị cộng án!';
+      pushChat({ type: 'system', text: `🚨 Cá độ bị bắt: ${a.nickname} & ${b.nickname}.`, ts: now });
+    } else {
+      pushChat({ type: 'system', text: note, ts: now });
+    }
+    for (const pl of [a, b]) {
+      const ent = [...online.entries()].find(([, x]) => x.id === pl.id);
+      if (!ent) continue;
+      const s = io.sockets.sockets.get(ent[0]);
+      if (!s) continue;
+      s.emit('betResult', { winnerId: winner.id, winnerNick: winner.nickname, amount: bet.amount, caught: det.caught, message: note });
+      emitSelf(s, pl);
+    }
+    broadcastState();
+  });
+
+  socket.on('trialAnswer', (payload) => {
+    const p = online.get(socket.id);
+    if (!p) return;
+    const trial = activeTrials.get(socket.id);
+    if (!trial) { socket.emit('errorMsg', 'Không có phiên tòa đang mở.'); return; }
+    const answers = (payload && payload.answers) || [];
+    const result = trialLib.gradeTrial(answers);
+    activeTrials.delete(socket.id);
+    p.trialDone = true;
+    if (result.innocent) {
+      p.money = (p.money || 0) + result.reward;
+      p.released = true;
+      p.visitorMode = true;
+      p.sentenceOnlineMsLeft = 0;
+      p.sentenceLeftDays = 0;
+      p.sentenceYears = 0;
+      socket.emit('trialVerdict', {
+        innocent: true,
+        correct: result.correct,
+        wrong: result.wrong,
+        years: 0,
+        reward: result.reward,
+        rewardNote: 'Thưởng xu in-game. Sau này nếu có nạp tiền có thể quy đổi thưởng thật.',
+        title: 'Vô tội',
+        message: `Tòa tuyên VÔ TỘI (${result.correct}/5). Nhận ${result.reward} xu thưởng! Bạn được thả như khách tự do.`,
+      });
+      pushChat({ type: 'system', text: `⚖️ Tòa tuyên ${p.nickname} VÔ TỘI — thưởng ${result.reward} xu.`, ts: Date.now() });
+    } else {
+      sentenceLib.setSentenceYears(p, result.years);
+      p.released = false;
+      p.visitorMode = false;
+      socket.emit('trialVerdict', {
+        innocent: false,
+        correct: result.correct,
+        wrong: result.wrong,
+        years: result.years,
+        hoursPerYear: 120,
+        sentence: sentenceLib.formatRemaining(p),
+        title: 'Có tội',
+        message: `Tòa tuyên CÓ TỘI — sai ${result.wrong} câu → án ${result.years} năm (1 năm = 120 giờ online). Còn ${sentenceLib.formatRemaining(p).label}.`,
+      });
+      pushChat({ type: 'system', text: `⚖️ Tòa tuyên ${p.nickname} có tội: ${result.years} năm (${result.wrong} câu sai).`, ts: Date.now() });
+    }
+    ensureAccountFields(p);
+    playersByNick[accountKey(p)] = stripTransient(p);
+    void saveData();
+    emitSelf(socket, p);
+    broadcastState();
+  });
+
+  socket.on('releaseChoice', (payload) => {
+    const p = online.get(socket.id);
+    if (!p || !p.released) return;
+    const choice = payload && payload.choice;
+    if (choice === 'visitor') {
+      p.visitorMode = true;
+      p.zone = 'general';
+      socket.emit('actionResult', { kind: 'release', message: 'Bạn ở lại thăm trại với tư cách khách tự do.' });
+    } else if (choice === 'newlife') {
+      p.released = false;
+      p.visitorMode = false;
+      p.intakeDone = false;
+      p.trialDone = false;
+      p.intakeStartedAt = Date.now();
+      p.intakeDurationMs = INTAKE_DEFAULT_MS;
+      p.intakeCuts = { exercise: false, talk: false, gift: false };
+      p.sentenceOnlineMsLeft = 0;
+      p.sentenceYears = 0;
+      p.room = 'khu_tam_giam';
+      p.zone = 'quarantine';
+      const qr = ROOM_BY_ID.khu_tam_giam;
+      if (qr) { p.x = qr.x; p.z = qr.z; }
+      socket.emit('actionResult', { kind: 'release', message: 'Đời mới — quay lại khu tạm giam chờ xét xử.' });
+    } else if (choice === 'guard') {
+      // Keep guard path: only if previously escaped successfully flagged, else soft allow with note
+      if (p.role === 'guard' || p.wasGuard || p.escapeSuccess) {
+        p.role = 'guard';
+        p.appearance = { ...(p.appearance || {}), stripe: 'police' };
+        p.visitorMode = false;
+        socket.emit('actionResult', { kind: 'release', message: 'Bạn nhận nhiệm vụ Quản giáo.' });
+      } else {
+        p.visitorMode = true;
+        socket.emit('errorMsg', 'Chưa đủ điều kiện Quản giáo (cần vượt ngục thành công trước). Bạn đang là khách tự do.');
+      }
+    }
+    ensureAccountFields(p);
+    playersByNick[accountKey(p)] = stripTransient(p);
+    void saveData();
+    emitSelf(socket, p);
+    broadcastState();
   });
 
   socket.on('startGame', (payload) => {
